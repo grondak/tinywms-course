@@ -1,0 +1,7 @@
+# Copy this file to a Raspberry Pi or Linux host as a local environment file.
+# Source it before starting the worker.
+# Do not commit real account-specific values.
+
+export AWS_REGION=us-east-1
+export TINYWMS_SQS_QUEUE_URL=https://sqs.us-east-1.amazonaws.com/123456789012/tinywms-lesson-pick-work
+export TINYWMS_PICK_TICKETS_PATH=/home/pi/tinywms/pick-tickets.txt

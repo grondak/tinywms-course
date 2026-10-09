@@ -1,0 +1,16 @@
+[Unit]
+Description=TinyWMS pick-ticket worker
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/tinywms
+Environment=AWS_REGION=us-east-1
+Environment=TINYWMS_PICK_TICKETS_PATH=/opt/tinywms/pick-tickets.txt
+EnvironmentFile=-/etc/tinywms/pick-ticket-worker.env
+ExecStart=/usr/bin/python3 /opt/tinywms/src/pick_ticket_worker.py --poll-seconds 2 --output /opt/tinywms/pick-tickets.txt
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

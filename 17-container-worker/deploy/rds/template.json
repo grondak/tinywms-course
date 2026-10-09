@@ -1,0 +1,69 @@
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+  "Description": "TinyWMS Amazon RDS deployment for the relational inventory lesson",
+  "Parameters": {
+    "DatabaseName": {
+      "Type": "String",
+      "Default": "tinywms",
+      "Description": "Logical database name used by the schema"
+    },
+    "MasterUsername": {
+      "Type": "String",
+      "NoEcho": true,
+      "Description": "RDS master user name; do not commit real secrets"
+    },
+    "MasterPassword": {
+      "Type": "String",
+      "NoEcho": true,
+      "Description": "RDS master password; supply at deploy time"
+    },
+    "DBInstanceClass": {
+      "Type": "String",
+      "Default": "db.t3.micro",
+      "Description": "Low-cost instance class suitable for teaching"
+    },
+    "VPCSecurityGroupId": {
+      "Type": "String",
+      "Description": "Security group that allows SQL access from the caller"
+    },
+    "SubnetIds": {
+      "Type": "CommaDelimitedList",
+      "Description": "Subnets for the DB subnet group"
+    }
+  },
+  "Resources": {
+    "TinyWmsDbSubnetGroup": {
+      "Type": "AWS::RDS::DBSubnetGroup",
+      "Properties": {
+        "DBSubnetGroupDescription": "TinyWMS subnet group",
+        "SubnetIds": { "Ref": "SubnetIds" }
+      }
+    },
+    "TinyWmsDatabase": {
+      "Type": "AWS::RDS::DBInstance",
+      "Properties": {
+        "AllocatedStorage": "20",
+        "DBInstanceClass": { "Ref": "DBInstanceClass" },
+        "DBName": { "Ref": "DatabaseName" },
+        "Engine": "postgres",
+        "MasterUsername": { "Ref": "MasterUsername" },
+        "MasterUserPassword": { "Ref": "MasterPassword" },
+        "DBSubnetGroupName": { "Ref": "TinyWmsDbSubnetGroup" },
+        "VPCSecurityGroups": [ { "Ref": "VPCSecurityGroupId" } ],
+        "BackupRetentionPeriod": 1,
+        "PubliclyAccessible": false,
+        "StorageType": "gp2"
+      }
+    }
+  },
+  "Outputs": {
+    "EndpointAddress": {
+      "Description": "RDS endpoint address",
+      "Value": { "Fn::GetAtt": ["TinyWmsDatabase", "Endpoint.Address"] }
+    },
+    "EndpointPort": {
+      "Description": "RDS endpoint port",
+      "Value": { "Fn::GetAtt": ["TinyWmsDatabase", "Endpoint.Port"] }
+    }
+  }
+}

@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>TinyWMS Inventory</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <main>
+    <h1>TinyWMS Inventory</h1>
+    <label>
+      Inventory API base URL
+      <input id="base-url" type="text" value="http://localhost:8000" size="60">
+    </label>
+    <button id="reload-button" type="button">Load inventory</button>
+    <p id="status">Loading inventory...</p>
+    <table>
+      <thead>
+        <tr><th>SKU</th><th>Description</th><th>Bin</th><th>Quantity</th></tr>
+      </thead>
+      <tbody id="inventory-body"></tbody>
+    </table>
+  </main>
+  <script src="/app.js"></script>
+</body>
+</html>

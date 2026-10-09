@@ -1,0 +1,10 @@
+{
+  "httpMethod": "GET",
+  "path": "/inventory",
+  "headers": {
+    "accept": "application/json"
+  },
+  "queryStringParameters": null,
+  "body": null,
+  "isBase64Encoded": false
+}

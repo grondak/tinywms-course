@@ -1,0 +1,10 @@
+#!/bin/sh
+set -eu
+: "${TINYWMS_DB_HOST:?set TINYWMS_DB_HOST to the RDS endpoint address}"
+: "${TINYWMS_DB_PORT:=5432}"
+: "${TINYWMS_DB_NAME:=tinywms}"
+: "${TINYWMS_DB_USER:?set TINYWMS_DB_USER}"
+: "${TINYWMS_DB_PASSWORD:?set TINYWMS_DB_PASSWORD}"
+
+export PGPASSWORD="$TINYWMS_DB_PASSWORD"
+exec psql -h "$TINYWMS_DB_HOST" -p "$TINYWMS_DB_PORT" -U "$TINYWMS_DB_USER" -d "$TINYWMS_DB_NAME"

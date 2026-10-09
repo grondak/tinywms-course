@@ -1,0 +1,13 @@
+[Unit]
+Description=TinyWMS HTTP server
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/tinywms
+Environment=TINYWMS_PORT=8000
+ExecStart=/usr/bin/python3 /opt/tinywms/src/http_server.py /opt/tinywms/data/inventory.json
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target

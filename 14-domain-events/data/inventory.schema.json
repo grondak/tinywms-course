@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "TinyWMS inventory",
+  "type": "object",
+  "required": ["inventory"],
+  "properties": {
+    "inventory": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["sku", "description", "bin", "quantity", "unit"],
+        "properties": {
+          "sku": { "type": "string" },
+          "description": { "type": "string" },
+          "bin": { "type": "string" },
+          "quantity": { "type": "integer", "minimum": 0 },
+          "unit": { "type": "string" }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

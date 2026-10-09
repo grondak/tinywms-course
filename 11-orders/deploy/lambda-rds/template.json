@@ -1,0 +1,54 @@
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+  "Description": "TinyWMS Lambda reading inventory from RDS",
+  "Parameters": {
+    "DbHost": {
+      "Type": "String",
+      "Description": "RDS endpoint address"
+    },
+    "DbPort": {
+      "Type": "Number",
+      "Default": 5432,
+      "Description": "RDS database port"
+    },
+    "DbName": {
+      "Type": "String",
+      "Default": "tinywms",
+      "Description": "Database name"
+    },
+    "DbUser": {
+      "Type": "String",
+      "NoEcho": true,
+      "Description": "Database user name"
+    },
+    "DbPassword": {
+      "Type": "String",
+      "NoEcho": true,
+      "Description": "Database password"
+    }
+  },
+  "Resources": {
+    "TinyWmsInventoryFunction": {
+      "Type": "AWS::Lambda::Function",
+      "Properties": {
+        "FunctionName": "tinywms-inventory-rds",
+        "Runtime": "python3.12",
+        "Handler": "src/lambda_inventory.handler",
+        "Role": "arn:aws:iam::123456789012:role/replace-me",
+        "Timeout": 10,
+        "Environment": {
+          "Variables": {
+            "TINYWMS_DB_HOST": { "Ref": "DbHost" },
+            "TINYWMS_DB_PORT": { "Ref": "DbPort" },
+            "TINYWMS_DB_NAME": { "Ref": "DbName" },
+            "TINYWMS_DB_USER": { "Ref": "DbUser" },
+            "TINYWMS_DB_PASSWORD": { "Ref": "DbPassword" }
+          }
+        },
+        "Code": {
+          "ZipFile": "placeholder for teaching only"
+        }
+      }
+    }
+  }
+}

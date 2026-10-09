@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>TinyWMS Inventory and Orders</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <main>
+    <h1>TinyWMS Inventory</h1>
+    <label>
+      Inventory API base URL
+      <input id="base-url" type="text" value="http://localhost:8000" size="60">
+    </label>
+    <button id="reload-button" type="button">Load inventory</button>
+    <p id="status">Loading inventory...</p>
+    <table>
+      <thead>
+        <tr><th>SKU</th><th>Description</th><th>Bin</th><th>Quantity</th></tr>
+      </thead>
+      <tbody id="inventory-body"></tbody>
+    </table>
+
+    <section>
+      <h2>Submit order</h2>
+      <p>This form sends JSON to <code>POST /orders</code>.</p>
+      <label>
+        Customer
+        <input id="order-customer" type="text" value="Example School Store">
+      </label>
+      <label>
+        SKU
+        <input id="order-sku" type="text" value="SKU-1001">
+      </label>
+      <label>
+        Quantity
+        <input id="order-quantity" type="number" value="1" min="1">
+      </label>
+      <button id="submit-order-button" type="button">Submit order</button>
+      <h3>JSON request body</h3>
+      <pre id="order-json">{}</pre>
+      <h3>Order response</h3>
+      <pre id="order-result">No order submitted yet.</pre>
+    </section>
+  </main>
+  <script src="/app.js"></script>
+</body>
+</html>
