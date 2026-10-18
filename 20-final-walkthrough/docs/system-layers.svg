@@ -1,0 +1,71 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 940" width="1600" height="940" font-family="Helvetica, Arial, sans-serif">
+<rect width="1600" height="940" fill="#ffffff"/>
+<text x="800.0" y="52.0" font-size="44" fill="#333333" font-weight="bold" text-anchor="middle" dominant-baseline="central"><tspan x="800.0" dy="0.0">TinyWMS: one order, four layers</tspan></text>
+<text x="800.0" y="112.0" font-size="26" fill="#333333" font-weight="normal" text-anchor="middle" dominant-baseline="central"><tspan x="800.0" dy="0.0">Order system (runs on a laptop with TINYWMS_LOCAL=1, or in AWS)</tspan></text>
+<rect x="190" y="140" width="1380" height="700" rx="60" fill="#9fd6d1" stroke="#333333" stroke-width="2"/>
+<polygon points="250,160 1440,160 1440,150 1500,177 1440,204 1440,194 250,194" fill="#fff" stroke="#333333" stroke-width="2"/>
+<text x="870" y="178.0" font-size="24" fill="#333333" font-weight="normal" text-anchor="middle" dominant-baseline="central"><tspan x="870" dy="0.0">Order journey, left to right: starts when a customer submits an order</tspan></text>
+<text x="14" y="290.0" font-size="24" fill="#333333" font-weight="normal" text-anchor="start" dominant-baseline="central"><tspan x="14" dy="0.0">Processes</tspan></text>
+<text x="14" y="425.0" font-size="24" fill="#333333" font-weight="normal" text-anchor="start" dominant-baseline="central"><tspan x="14" dy="0.0">Shared files</tspan><tspan x="14" dy="30.0">&amp; messages</tspan></text>
+<text x="14" y="605.0" font-size="24" fill="#333333" font-weight="normal" text-anchor="start" dominant-baseline="central"><tspan x="14" dy="0.0">Entity</tspan><tspan x="14" dy="30.0">operations</tspan></text>
+<text x="14" y="780.0" font-size="24" fill="#333333" font-weight="normal" text-anchor="start" dominant-baseline="central"><tspan x="14" dy="0.0">Storage</tspan></text>
+<rect x="214" y="235" width="235" height="110" fill="#ffffff" stroke="#333333" stroke-width="2"/>
+<line x1="236" y1="235" x2="236" y2="345" stroke="#333333" stroke-width="2"/><line x1="427" y1="235" x2="427" y2="345" stroke="#333333" stroke-width="2"/>
+<text x="331.5" y="277.5" font-size="20" fill="#333333" font-weight="normal" text-anchor="middle" dominant-baseline="central"><tspan x="331.5" dy="0.0">Browser page</tspan><tspan x="331.5" dy="25.0">(index.html, app.js)</tspan></text>
+<rect x="487" y="235" width="235" height="110" fill="#ffffff" stroke="#333333" stroke-width="2"/>
+<line x1="509" y1="235" x2="509" y2="345" stroke="#333333" stroke-width="2"/><line x1="700" y1="235" x2="700" y2="345" stroke="#333333" stroke-width="2"/>
+<text x="604.5" y="277.5" font-size="20" fill="#333333" font-weight="normal" text-anchor="middle" dominant-baseline="central"><tspan x="604.5" dy="0.0">Order API</tspan><tspan x="604.5" dy="25.0">(Lambda handler)</tspan></text>
+<rect x="760" y="235" width="235" height="110" fill="#ffffff" stroke="#333333" stroke-width="2"/>
+<line x1="782" y1="235" x2="782" y2="345" stroke="#333333" stroke-width="2"/><line x1="973" y1="235" x2="973" y2="345" stroke="#333333" stroke-width="2"/>
+<text x="877.5" y="290.0" font-size="20" fill="#333333" font-weight="normal" text-anchor="middle" dominant-baseline="central"><tspan x="877.5" dy="0.0">Pick-ticket worker</tspan></text>
+<rect x="1033" y="235" width="235" height="110" fill="#ffffff" stroke="#333333" stroke-width="2"/>
+<line x1="1055" y1="235" x2="1055" y2="345" stroke="#333333" stroke-width="2"/><line x1="1246" y1="235" x2="1246" y2="345" stroke="#333333" stroke-width="2"/>
+<text x="1150.5" y="290.0" font-size="20" fill="#333333" font-weight="normal" text-anchor="middle" dominant-baseline="central"><tspan x="1150.5" dy="0.0">Event consumer A</tspan></text>
+<rect x="1306" y="235" width="235" height="110" fill="#ffffff" stroke="#333333" stroke-width="2"/>
+<line x1="1328" y1="235" x2="1328" y2="345" stroke="#333333" stroke-width="2"/><line x1="1519" y1="235" x2="1519" y2="345" stroke="#333333" stroke-width="2"/>
+<text x="1423.5" y="290.0" font-size="20" fill="#333333" font-weight="normal" text-anchor="middle" dominant-baseline="central"><tspan x="1423.5" dy="0.0">Event consumer B</tspan></text>
+<polygon points="366,385 580,385 544,495 330,495" fill="#648f8d" stroke="#333333" stroke-width="2"/>
+<text x="455" y="415.0" font-size="20" fill="#ffffff" font-weight="normal" text-anchor="middle" dominant-baseline="central"><tspan x="455" dy="0.0">Pick-work queue</tspan><tspan x="455" dy="25.0">one message per</tspan><tspan x="455" dy="25.0">order line</tspan></text>
+<polygon points="686,385 900,385 864,495 650,495" fill="#648f8d" stroke="#333333" stroke-width="2"/>
+<text x="775" y="415.0" font-size="20" fill="#ffffff" font-weight="normal" text-anchor="middle" dominant-baseline="central"><tspan x="775" dy="0.0">OrderPlaced event</tspan><tspan x="775" dy="25.0">copied to consumers</tspan><tspan x="775" dy="25.0">A and B</tspan></text>
+<polygon points="1006,385 1220,385 1184,495 970,495" fill="#648f8d" stroke="#333333" stroke-width="2"/>
+<text x="1095" y="427.5" font-size="20" fill="#ffffff" font-weight="normal" text-anchor="middle" dominant-baseline="central"><tspan x="1095" dy="0.0">pick-tickets.txt</tspan><tspan x="1095" dy="25.0">the worker output</tspan></text>
+<polygon points="1326,385 1540,385 1504,495 1290,495" fill="#648f8d" stroke="#333333" stroke-width="2"/>
+<text x="1415" y="427.5" font-size="20" fill="#ffffff" font-weight="normal" text-anchor="middle" dominant-baseline="central"><tspan x="1415" dy="0.0">Worker state file</tspan><tspan x="1415" dy="25.0">processed IDs</tspan></text>
+<rect x="330" y="525" width="56" height="190" fill="none" stroke="#6a7f7d" stroke-width="2" stroke-dasharray="7 6"/>
+<text x="358" y="620.0" font-size="26" fill="#6a7f7d" font-weight="normal" text-anchor="middle" dominant-baseline="central" transform="rotate(-90 358 620)"><tspan x="358" dy="0.0">Create</tspan></text>
+<rect x="386" y="525" width="56" height="190" fill="#b87d30" stroke="#333333" stroke-width="2"/>
+<text x="414" y="620.0" font-size="26" fill="#ffffff" font-weight="normal" text-anchor="middle" dominant-baseline="central" transform="rotate(-90 414 620)"><tspan x="414" dy="0.0">Read</tspan></text>
+<rect x="442" y="525" width="56" height="190" fill="#b87d30" stroke="#333333" stroke-width="2"/>
+<text x="470" y="620.0" font-size="26" fill="#ffffff" font-weight="normal" text-anchor="middle" dominant-baseline="central" transform="rotate(-90 470 620)"><tspan x="470" dy="0.0">Update</tspan></text>
+<rect x="498" y="525" width="56" height="190" fill="none" stroke="#6a7f7d" stroke-width="2" stroke-dasharray="7 6"/>
+<text x="526" y="620.0" font-size="26" fill="#6a7f7d" font-weight="normal" text-anchor="middle" dominant-baseline="central" transform="rotate(-90 526 620)"><tspan x="526" dy="0.0">Delete</tspan></text>
+<rect x="700" y="525" width="56" height="190" fill="#b87d30" stroke="#333333" stroke-width="2"/>
+<text x="728" y="620.0" font-size="26" fill="#ffffff" font-weight="normal" text-anchor="middle" dominant-baseline="central" transform="rotate(-90 728 620)"><tspan x="728" dy="0.0">Create</tspan></text>
+<rect x="756" y="525" width="56" height="190" fill="none" stroke="#6a7f7d" stroke-width="2" stroke-dasharray="7 6"/>
+<text x="784" y="620.0" font-size="26" fill="#6a7f7d" font-weight="normal" text-anchor="middle" dominant-baseline="central" transform="rotate(-90 784 620)"><tspan x="784" dy="0.0">Read</tspan></text>
+<rect x="812" y="525" width="56" height="190" fill="none" stroke="#6a7f7d" stroke-width="2" stroke-dasharray="7 6"/>
+<text x="840" y="620.0" font-size="26" fill="#6a7f7d" font-weight="normal" text-anchor="middle" dominant-baseline="central" transform="rotate(-90 840 620)"><tspan x="840" dy="0.0">Update</tspan></text>
+<rect x="868" y="525" width="56" height="190" fill="none" stroke="#6a7f7d" stroke-width="2" stroke-dasharray="7 6"/>
+<text x="896" y="620.0" font-size="26" fill="#6a7f7d" font-weight="normal" text-anchor="middle" dominant-baseline="central" transform="rotate(-90 896 620)"><tspan x="896" dy="0.0">Delete</tspan></text>
+<rect x="1070" y="525" width="56" height="190" fill="#b87d30" stroke="#333333" stroke-width="2"/>
+<text x="1098" y="620.0" font-size="26" fill="#ffffff" font-weight="normal" text-anchor="middle" dominant-baseline="central" transform="rotate(-90 1098 620)"><tspan x="1098" dy="0.0">Create</tspan></text>
+<rect x="1126" y="525" width="56" height="190" fill="none" stroke="#6a7f7d" stroke-width="2" stroke-dasharray="7 6"/>
+<text x="1154" y="620.0" font-size="26" fill="#6a7f7d" font-weight="normal" text-anchor="middle" dominant-baseline="central" transform="rotate(-90 1154 620)"><tspan x="1154" dy="0.0">Read</tspan></text>
+<rect x="1182" y="525" width="56" height="190" fill="none" stroke="#6a7f7d" stroke-width="2" stroke-dasharray="7 6"/>
+<text x="1210" y="620.0" font-size="26" fill="#6a7f7d" font-weight="normal" text-anchor="middle" dominant-baseline="central" transform="rotate(-90 1210 620)"><tspan x="1210" dy="0.0">Update</tspan></text>
+<rect x="1238" y="525" width="56" height="190" fill="none" stroke="#6a7f7d" stroke-width="2" stroke-dasharray="7 6"/>
+<text x="1266" y="620.0" font-size="26" fill="#6a7f7d" font-weight="normal" text-anchor="middle" dominant-baseline="central" transform="rotate(-90 1266 620)"><tspan x="1266" dy="0.0">Delete</tspan></text>
+<path d="M297.0,757 v46 a145.0,22 0 0 0 290,0 v-46" fill="#2b6070" stroke="#333333" stroke-width="2"/>
+<ellipse cx="442" cy="757" rx="145.0" ry="22" fill="#1f4a57" stroke="#333333" stroke-width="2"/>
+<text x="442" y="792.0" font-size="28" fill="#ffffff" font-weight="normal" text-anchor="middle" dominant-baseline="central"><tspan x="442" dy="0.0">Inventory</tspan></text>
+<path d="M667.0,757 v46 a145.0,22 0 0 0 290,0 v-46" fill="#2b6070" stroke="#333333" stroke-width="2"/>
+<ellipse cx="812" cy="757" rx="145.0" ry="22" fill="#1f4a57" stroke="#333333" stroke-width="2"/>
+<text x="812" y="792.0" font-size="28" fill="#ffffff" font-weight="normal" text-anchor="middle" dominant-baseline="central"><tspan x="812" dy="0.0">Orders</tspan></text>
+<path d="M1037.0,757 v46 a145.0,22 0 0 0 290,0 v-46" fill="#2b6070" stroke="#333333" stroke-width="2"/>
+<ellipse cx="1182" cy="757" rx="145.0" ry="22" fill="#1f4a57" stroke="#333333" stroke-width="2"/>
+<text x="1182" y="792.0" font-size="28" fill="#ffffff" font-weight="normal" text-anchor="middle" dominant-baseline="central"><tspan x="1182" dy="0.0">Order lines</tspan></text>
+<text x="1450" y="745.0" font-size="20" fill="#333333" font-weight="normal" text-anchor="middle" dominant-baseline="central"><tspan x="1450" dy="0.0">one database:</tspan><tspan x="1450" dy="25.0">SQLite file locally,</tspan><tspan x="1450" dy="25.0">PostgreSQL on RDS</tspan></text>
+<text x="800.0" y="872.0" font-size="20" fill="#333333" font-weight="normal" text-anchor="middle" dominant-baseline="central"><tspan x="800.0" dy="0.0">Brown = used by TinyWMS today; dashed = not implemented.  Locally, folders under local-aws/ stand in for the SQS queue and the EventBridge subscribers.</tspan></text>
+<text x="800.0" y="904.0" font-size="20" fill="#333333" font-weight="normal" text-anchor="middle" dominant-baseline="central"><tspan x="800.0" dy="0.0">Cloud: Lambda + API Gateway, RDS, SQS, EventBridge, and the worker on Linux or in a container.</tspan></text>
+</svg>

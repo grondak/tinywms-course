@@ -24,7 +24,10 @@ class ReceivedMessage:
 
 def _default_sqs_client():
     if os.environ.get('TINYWMS_LOCAL'):
-        from src.local_aws import FileQueue
+        try:
+            from src.local_aws import FileQueue
+        except ModuleNotFoundError:           # run as "python3 src/pick_ticket_worker.py"
+            from local_aws import FileQueue
         return FileQueue()
     if boto3 is None:
         raise RuntimeError('boto3 is required only when no injected SQS client is provided')

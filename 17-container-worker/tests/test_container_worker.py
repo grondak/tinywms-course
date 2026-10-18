@@ -13,8 +13,9 @@ class ContainerWorkerTests(unittest.TestCase):
     def test_dockerfile_uses_real_worker_entrypoint_and_defaults(self):
         text = DOCKERFILE.read_text(encoding='utf-8')
         self.assertIn('FROM python:3.11-slim', text)
-        self.assertIn('COPY pick_ticket_worker.py /app/pick_ticket_worker.py', text)
-        self.assertIn('COPY sqs_consumer.py /app/sqs_consumer.py', text)
+        self.assertIn('COPY src/pick_ticket_worker.py /app/pick_ticket_worker.py', text)
+        self.assertIn('COPY src/sqs_consumer.py /app/sqs_consumer.py', text)
+        self.assertIn('COPY src/local_aws.py /app/local_aws.py', text)
         self.assertIn('ENTRYPOINT ["python3", "/app/pick_ticket_worker.py"]', text)
         self.assertIn('CMD ["pick-work-queue-url", "pick-tickets.txt", "--state-file", "pick-ticket-worker-state.json"]', text)
 
