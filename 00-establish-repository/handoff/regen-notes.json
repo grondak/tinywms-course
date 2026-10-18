@@ -1,0 +1,20 @@
+{
+  "current_stage": "00-establish-repository",
+  "notes": [
+    {
+      "boundary_change": "",
+      "components": {
+        "added": "",
+        "replaced_or_evolved": "",
+        "reused_unchanged": ""
+      },
+      "continuity_checks": [
+        "README file-map paths must exist in the stage snapshot.",
+        "Inherited contracts remain stable unless this stage prompt explicitly changes them."
+      ],
+      "inherited_contract": "",
+      "stage": "00-establish-repository",
+      "summary": "Establish the TinyWMS repository scaffold and teaching docs with no runnable application yet."
+    }
+  ]
+}

@@ -1,71 +1,86 @@
-import io
+import json
 import unittest
-from contextlib import redirect_stdout
-from unittest import mock
 
-from src import sqs_consumer
+from src.sqs_consumer import consume_messages
 
 
-class SqsConsumerTests(unittest.TestCase):
-    def test_parse_receive_message_response_extracts_message_and_attributes(self):
-        xml_text = """
-        <ReceiveMessageResponse>
-          <ReceiveMessageResult>
-            <Message>
-              <MessageId>abc-123</MessageId>
-              <ReceiptHandle>handle-1</ReceiptHandle>
-              <Body>{"messageType":"PickWorkRequested"}</Body>
-              <Attribute>
-                <Name>ApproximateReceiveCount</Name>
-                <Value>2</Value>
-              </Attribute>
-            </Message>
-          </ReceiveMessageResult>
-        </ReceiveMessageResponse>
-        """
-        messages = sqs_consumer.parse_receive_message_response(xml_text)
-        self.assertEqual(messages[0]["MessageId"], "abc-123")
-        self.assertEqual(messages[0]["attributes"]["ApproximateReceiveCount"], "2")
+class FakeSqsClient:
+    def __init__(self, messages=None):
+        self.messages = messages or []
+        self.received = []
+        self.deleted = []
 
-    def test_print_message_without_ack_leaves_message_for_retry(self):
-        buffer = io.StringIO()
-        with redirect_stdout(buffer):
-            sqs_consumer.print_message(
-                {
-                    "MessageId": "abc-123",
-                    "ReceiptHandle": "handle-1",
-                    "Body": '{"messageType":"PickWorkRequested"}',
-                    "attributes": {"ApproximateReceiveCount": "1"},
-                },
-                ack=False,
-            )
-        output = buffer.getvalue()
-        self.assertIn('"messageId": "abc-123"', output)
-        self.assertIn('PickWorkRequested', output)
-        self.assertIn('left messageId=abc-123 on queue for retry', output)
+    def receive_message(self, **kwargs):
+        self.received.append(kwargs)
+        return {'Messages': self.messages}
 
-    def test_print_message_with_ack_deletes_message(self):
-        buffer = io.StringIO()
-        with mock.patch("src.sqs_consumer.delete_message") as delete_message, redirect_stdout(buffer):
-            sqs_consumer.print_message(
-                {
-                    "MessageId": "abc-123",
-                    "ReceiptHandle": "handle-1",
-                    "Body": '{"messageType":"PickWorkRequested"}',
-                    "attributes": {"ApproximateReceiveCount": "3"},
-                },
-                ack=True,
-            )
-        delete_message.assert_called_once_with("handle-1")
-        self.assertIn('acknowledged messageId=abc-123', buffer.getvalue())
-
-    def test_main_prints_no_messages(self):
-        buffer = io.StringIO()
-        with mock.patch("src.sqs_consumer.receive_messages", return_value=[]), redirect_stdout(buffer):
-            code = sqs_consumer.main(["sqs_consumer.py"])
-        self.assertEqual(code, 0)
-        self.assertIn("no messages available", buffer.getvalue())
+    def delete_message(self, **kwargs):
+        self.deleted.append(kwargs)
+        return {}
 
 
-if __name__ == "__main__":
+class ConsumerTests(unittest.TestCase):
+    def test_success_deletes_message(self):
+        client = FakeSqsClient([
+            {
+                'MessageId': 'm-1',
+                'ReceiptHandle': 'rh-1',
+                'Body': json.dumps({'command_id': 'pick-work:1', 'sku': 'SKU-001'}),
+                'Attributes': {'ApproximateReceiveCount': '1'},
+            }
+        ])
+        seen = []
+
+        def callback(payload, message):
+            seen.append((payload, message.message_id, message.receipt_handle))
+
+        processed = consume_messages('queue-url', callback, sqs_client=client, wait_time_seconds=1)
+
+        self.assertEqual(processed, 1)
+        self.assertEqual(len(client.received), 1)
+        self.assertEqual(client.deleted[0]['ReceiptHandle'], 'rh-1')
+        self.assertEqual(seen[0][0]['sku'], 'SKU-001')
+
+    def test_callback_failure_does_not_delete(self):
+        client = FakeSqsClient([
+            {
+                'MessageId': 'm-1',
+                'ReceiptHandle': 'rh-1',
+                'Body': json.dumps({'command_id': 'pick-work:1', 'sku': 'SKU-001'}),
+                'Attributes': {'ApproximateReceiveCount': '2'},
+            }
+        ])
+
+        def callback(payload, message):
+            raise RuntimeError('boom')
+
+        with self.assertRaises(RuntimeError):
+            consume_messages('queue-url', callback, sqs_client=client, wait_time_seconds=1)
+
+        self.assertEqual(len(client.received), 1)
+        self.assertEqual(client.deleted, [])
+
+    def test_processes_each_message(self):
+        client = FakeSqsClient([
+            {
+                'MessageId': 'm-1',
+                'ReceiptHandle': 'rh-1',
+                'Body': json.dumps({'command_id': 'pick-work:1', 'sku': 'SKU-001'}),
+            },
+            {
+                'MessageId': 'm-2',
+                'ReceiptHandle': 'rh-2',
+                'Body': json.dumps({'command_id': 'pick-work:2', 'sku': 'SKU-002'}),
+            },
+        ])
+        seen = []
+
+        processed = consume_messages('queue-url', lambda payload, message: seen.append(payload['command_id']), sqs_client=client, wait_time_seconds=1)
+
+        self.assertEqual(processed, 2)
+        self.assertEqual(seen, ['pick-work:1', 'pick-work:2'])
+        self.assertEqual(len(client.deleted), 2)
+
+
+if __name__ == '__main__':
     unittest.main()

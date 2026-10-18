@@ -1,84 +1,59 @@
 # TinyWMS lesson: 19-git-history
 
 ## Stage purpose
-This stage teaches students to use Git history as part of the system architecture story. Instead of treating the repository as only the final AWS version, students can check out named milestones and see the simpler JSON CLI, Pi HTTP server, browser, Lambda, database, queue/event, worker, and container stages as they actually existed.
+This stage teaches students how to read TinyWMS as a semester story in Git instead of pretending each lesson is a separate historical commit. The repository keeps the stage directories together in one checkout, so students can compare earlier and later lesson folders honestly without rewriting history or inventing tags.
 
 ## Files in this lesson
-- `README.md` - this lesson guide for creating and using milestone tags in the TinyWMS teaching repository
-- `docs/architecture.md` - updated architecture guide explaining how Git milestones preserve the semester's architecture history
-- `docs/git-milestones.md` - milestone/tag map with suggested tag names, what each checkpoint represents, and how to verify each one after checkout
-- `docs/data-contracts.md` - updated to note that Git milestones preserve changing implementations while keeping visible contracts understandable across stages
-- `tests/test_git_milestones_doc.py` - tests that validate the milestone document covers the major teaching checkpoints named in this lesson
+- `README.md` - lesson guide for the Git-history stage.
+- `docs/git-history.md` - explanation of the repository’s stage-directory model and honest comparison commands.
+- `docs/architecture.md` - updated component timeline derived from the existing assembly map.
+- `data/inventory.json` - inherited inventory sample used by earlier stages.
+- `data/inventory.schema.json` - inherited inventory schema.
+- `data/orders.schema.json` - inherited order schema.
+- `data/pick-work.json` - inherited pick-work command example.
+- `data/schema.sql` - inherited relational schema.
+- `data/seed.sql` - inherited relational seed data.
+- `src/lambda_inventory.py` - inherited order/inventory handler used by later cloud stages.
+- `src/pick_ticket_worker.py` - inherited worker used by the queue lesson and later demos.
+- `infra/template.yaml` - consolidated cloud stack artifact from the AWS lesson.
+- `tests/test_deployment_wiring.py` - inherited standard-library deployment wiring checks.
 
 ## Run the lesson
-From this folder:
+From the repository root:
 ```bash
-python3 -m unittest discover -s tests
-node --test tests/test_web_app.js
+python3 -m unittest discover -s tests -v
 ```
 
-Review the milestone map:
+To inspect the history lesson text directly:
 ```bash
-cat docs/git-milestones.md
+sed -n '1,220p' docs/git-history.md
 ```
 
-Create the recommended annotated tags after you confirm the repository history lines up with your accepted stages:
+To compare two lesson artifacts without inventing tags:
 ```bash
-git tag -a lesson-01-json-cli -m "Stage 1: JSON CLI backbone"
-git tag -a lesson-03-pi-http -m "Stage 3: Raspberry Pi HTTP server"
-git tag -a lesson-05-ec2-http -m "Stage 5: EC2 deployment path"
-git tag -a lesson-04-browser -m "Stage 4: browser inventory page"
-git tag -a lesson-06-lambda -m "Stage 6: Lambda inventory"
-git tag -a lesson-07-api-gateway -m "Stage 7: API Gateway in front of Lambda"
-git tag -a lesson-08-relational-db -m "Stage 8: relational schema and mapping"
-git tag -a lesson-09-rds -m "Stage 9: RDS deployment option"
-git tag -a lesson-12-transactional-orders -m "Stages 11-12: orders and concurrency control"
-git tag -a lesson-14-queue-event -m "Stages 13-14: SQS command and EventBridge event"
-git tag -a lesson-15-pick-ticket-worker -m "Stage 15: pick-ticket worker"
-git tag -a lesson-17-container-worker -m "Stage 17: containerized worker"
-git tag -a lesson-18-aws-deployment -m "Stage 18: reproducible AWS deployment"
-```
-
-List the tags:
-```bash
-git tag --list 'lesson-*'
-```
-
-Check out one milestone in detached HEAD mode and inspect it:
-```bash
-git checkout lesson-03-pi-http
-ls
-python3 -m unittest discover -s tests
-```
-
-Return to your working branch:
-```bash
-git switch -
-```
-
-Push tags to a remote when you are ready:
-```bash
-git push origin --tags
+git diff --no-index deploy/pick-ticket-worker/README.md deploy/container-worker/README.md
 ```
 
 ## Run tests
 ```bash
-python3 -m unittest discover -s tests
 node --test tests/test_web_app.js
 ```
 
-## Student exercises
-1. Check out `lesson-03-pi-http` and `lesson-18-aws-deployment` one at a time. For each checkout, identify where the code is running, where the data is stored, and which boundaries are JSON, HTTP, SQL, or AWS resources.
-2. Create one additional local annotated tag for a milestone you personally found important, such as the callback demo stage, then write one verification command you would run after checking it out.
+```bash
+PYTHONPATH=src python3 -m unittest discover -s tests -v
+```
 
+## Student exercises
+1. Open `docs/git-history.md`, pick two real stage artifacts, and run `git diff --no-index` on them so you can see how the queue, worker, and deployment lessons changed over time.
+2. Compare `docs/architecture.md` to `docs/git-history.md`, then edit the history guide to add one more honest comparison command that uses existing paths from this checkout and observe the new text with `sed`.
 ## Continuity note
-- Inherited contract: the application code, JSON contracts, SQL schema meaning, SQS message, EventBridge event, and worker output all remain byte-for-byte compatible with the previous stage
-- Boundary changed in this stage: the repository now explicitly documents Git milestones so students can move across time and inspect earlier architectural boundaries instead of only reading about them
+- Inherited contract: the inventory JSON, order JSON, pick-work command, OrderPlaced event, and pick-ticket output contracts remain unchanged.
+- Boundary changed in this stage: history becomes part of the lesson artifact, so students now study stage directories and real file comparisons rather than imagined milestone tags.
+
+## Component assembly update
+- Added: `docs/git-history.md` as the new lesson artifact for comparing stages honestly.
+- Reused unchanged: `data/inventory.json`, `data/inventory.schema.json`, `data/orders.schema.json`, `data/pick-work.json`, `data/schema.sql`, `data/seed.sql`, `src/lambda_inventory.py`, `src/pick_ticket_worker.py`, `infra/template.yaml`, and `tests/test_deployment_wiring.py` from earlier stages.
+- Replaced/evolved: `README.md` and `docs/architecture.md` now include the Git-history lesson and a component-evolution timeline that points students at real stage paths.
 
 ## Cleanup
-No external resources are created in this stage.
-
-If you created local tags that you do not want to keep yet:
-```bash
-git tag -d lesson-01-json-cli lesson-03-pi-http lesson-05-ec2-http lesson-04-browser lesson-06-lambda lesson-07-api-gateway lesson-08-relational-db lesson-09-rds lesson-12-transactional-orders lesson-14-queue-event lesson-15-pick-ticket-worker lesson-17-container-worker lesson-18-aws-deployment
-```
+No external resources are created in this stage. If you make local comparison copies while experimenting, remove them when you are done.

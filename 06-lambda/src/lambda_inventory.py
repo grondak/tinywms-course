@@ -1,40 +1,28 @@
-#!/usr/bin/env python3
+from __future__ import annotations
+
 import json
-import sys
+import os
 from pathlib import Path
+from typing import Any
 
-INVENTORY_PATH = Path("data/inventory.json")
+ROOT = Path(__file__).resolve().parents[1]
+INVENTORY_FILE = ROOT / 'data' / 'inventory.json'
+DB_DSN_ENV = 'DATABASE_URL'
 
 
-def load_inventory(path=INVENTORY_PATH):
-    return json.loads(Path(path).read_text(encoding="utf-8"))
-
-
-def build_response(status_code, body_obj):
-    return {
-        "statusCode": status_code,
-        "headers": {
-            "Content-Type": "application/json"
-        },
-        "isBase64Encoded": False,
-        "body": json.dumps(body_obj, indent=2, sort_keys=True)
-    }
+def load_inventory() -> list[dict[str, Any]]:
+    return json.loads(INVENTORY_FILE.read_text(encoding='utf-8'))
 
 
 def handler(event, context):
-    method = event.get("httpMethod")
-    path = event.get("path")
-    if method != "GET" or path != "/inventory":
-        return build_response(404, {"error": "not found", "method": method, "path": path})
-    return build_response(200, load_inventory())
-
-
-def main(argv):
-    event = json.load(sys.stdin)
-    response = handler(event, None)
-    print(json.dumps(response, indent=2, sort_keys=True))
-    return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main(sys.argv))
+    event = event or {}
+    query_string = event.get('queryStringParameters') or {}
+    if query_string.get('demo') == 'local-json':
+        payload = load_inventory()
+    else:
+        payload = load_inventory()
+    return {
+        'statusCode': 200,
+        'headers': {'Content-Type': 'application/json'},
+        'body': json.dumps(payload),
+    }

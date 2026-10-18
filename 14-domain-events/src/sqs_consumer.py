@@ -1,119 +1,77 @@
 #!/usr/bin/env python3
-import argparse
+from __future__ import annotations
+
 import json
-import os
-import sys
-import urllib.error
-import urllib.request
-from xml.etree import ElementTree
+from dataclasses import dataclass
+from typing import Any, Callable
+
+try:
+    import boto3  # type: ignore
+except ModuleNotFoundError:  # pragma: no cover
+    boto3 = None
 
 
-def aws_region_from_env():
-    return os.environ.get("AWS_REGION") or os.environ.get("AWS_DEFAULT_REGION") or "us-east-1"
+@dataclass(frozen=True)
+class ReceivedMessage:
+    message_id: str | None
+    receipt_handle: str | None
+    body: str
+    attributes: dict[str, Any]
+    message_attributes: dict[str, Any]
+    md5_of_body: str | None = None
 
 
-def queue_url_from_env():
-    queue_url = os.environ.get("TINYWMS_SQS_QUEUE_URL", "").strip()
-    if not queue_url:
-        raise RuntimeError("TINYWMS_SQS_QUEUE_URL is not set")
-    return queue_url
+def _default_sqs_client():
+    if boto3 is None:
+        raise RuntimeError('boto3 is required only when no injected SQS client is provided')
+    return boto3.client('sqs')
 
 
-def sqs_request(action, params):
-    queue_url = queue_url_from_env()
-    form = {"Action": action, "Version": "2012-11-05"}
-    form.update(params)
-    data = urllib.parse.urlencode(form).encode("utf-8")
-    request = urllib.request.Request(queue_url, data=data, method="POST")
-    request.add_header("Content-Type", "application/x-www-form-urlencoded")
-    request.add_header("X-Amz-Target", f"AmazonSQS.{action}")
-    request.add_header("X-TinyWMS-Region", aws_region_from_env())
-    with urllib.request.urlopen(request) as response:
-        return response.read().decode("utf-8")
-
-
-def parse_receive_message_response(xml_text):
-    root = ElementTree.fromstring(xml_text)
-    messages = []
-    for message in root.findall(".//Message"):
-        entry = {}
-        for child in message:
-            if child.tag == "Attribute":
-                name = child.findtext("Name")
-                value = child.findtext("Value")
-                entry.setdefault("attributes", {})[name] = value
-            else:
-                entry[child.tag] = child.text or ""
-        messages.append(entry)
-    return messages
-
-
-def receive_messages(max_messages=1, visibility_timeout=30, wait_time=0):
-    xml_text = sqs_request(
-        "ReceiveMessage",
-        {
-            "MaxNumberOfMessages": str(max_messages),
-            "VisibilityTimeout": str(visibility_timeout),
-            "WaitTimeSeconds": str(wait_time),
-            "AttributeName.1": "ApproximateReceiveCount",
-            "AttributeName.2": "SentTimestamp",
-        },
+def _received_message(message: dict[str, Any]) -> ReceivedMessage:
+    return ReceivedMessage(
+        message_id=message.get('MessageId'),
+        receipt_handle=message.get('ReceiptHandle'),
+        body=message.get('Body', ''),
+        attributes=message.get('Attributes', {}),
+        message_attributes=message.get('MessageAttributes', {}),
+        md5_of_body=message.get('MD5OfBody'),
     )
-    return parse_receive_message_response(xml_text)
 
 
-def delete_message(receipt_handle):
-    sqs_request("DeleteMessage", {"ReceiptHandle": receipt_handle})
-
-
-def print_message(message, ack=False):
-    metadata = {
-        "messageId": message.get("MessageId"),
-        "receiptHandle": message.get("ReceiptHandle"),
-        "receiveCount": message.get("attributes", {}).get("ApproximateReceiveCount"),
-        "sentTimestamp": message.get("attributes", {}).get("SentTimestamp"),
-    }
-    print(json.dumps({"metadata": metadata}, indent=2, sort_keys=True))
-    body_text = message.get("Body", "")
-    try:
-        body_json = json.loads(body_text)
-        print(json.dumps(body_json, indent=2, sort_keys=True))
-    except json.JSONDecodeError:
-        print(body_text)
-
-    if ack:
-        delete_message(message["ReceiptHandle"])
-        print(f"acknowledged messageId={message.get('MessageId')}")
-    else:
-        print(f"left messageId={message.get('MessageId')} on queue for retry")
-
-
-def main(argv):
-    parser = argparse.ArgumentParser(description="Receive TinyWMS pick-work messages from SQS")
-    parser.add_argument("--max-messages", type=int, default=1)
-    parser.add_argument("--visibility-timeout", type=int, default=30)
-    parser.add_argument("--wait-time", type=int, default=0)
-    parser.add_argument("--ack", action="store_true", help="delete each received message after printing it")
-    args = parser.parse_args(argv[1:])
-
-    try:
-        messages = receive_messages(
-            max_messages=args.max_messages,
-            visibility_timeout=args.visibility_timeout,
-            wait_time=args.wait_time,
-        )
-    except (RuntimeError, urllib.error.URLError, ElementTree.ParseError) as exc:
-        print(f"consumer error: {exc}", file=sys.stderr)
-        return 1
-
-    if not messages:
-        print("no messages available")
-        return 0
-
+def consume_messages(
+    queue_url: str,
+    callback: Callable[[dict[str, Any], ReceivedMessage], Any],
+    *,
+    sqs_client=None,
+    wait_time_seconds: int = 20,
+    max_number_of_messages: int = 10,
+) -> int:
+    client = sqs_client or _default_sqs_client()
+    response = client.receive_message(
+        QueueUrl=queue_url,
+        MaxNumberOfMessages=max_number_of_messages,
+        WaitTimeSeconds=wait_time_seconds,
+        AttributeNames=['All'],
+        MessageAttributeNames=['All'],
+    )
+    messages = response.get('Messages', [])
+    processed = 0
     for message in messages:
-        print_message(message, ack=args.ack)
-    return 0
+        received = _received_message(message)
+        visible_metadata = {
+            'message_id': received.message_id,
+            'receipt_handle': received.receipt_handle,
+            'attributes': received.attributes,
+            'message_attributes': received.message_attributes,
+            'md5_of_body': received.md5_of_body,
+        }
+        print(json.dumps(visible_metadata, indent=2, sort_keys=True))
+        payload = json.loads(received.body)
+        callback(payload, received)
+        client.delete_message(QueueUrl=queue_url, ReceiptHandle=received.receipt_handle)
+        processed += 1
+    return processed
 
 
-if __name__ == "__main__":
-    raise SystemExit(main(sys.argv))
+if __name__ == '__main__':  # pragma: no cover
+    raise SystemExit('Use as an imported consumer helper in tests or a small wrapper script')

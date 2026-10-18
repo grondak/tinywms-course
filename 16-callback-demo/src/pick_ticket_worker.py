@@ -1,115 +1,100 @@
 #!/usr/bin/env python3
+from __future__ import annotations
+
 import argparse
 import json
 import signal
 import sys
-import time
 from pathlib import Path
+from typing import Any
 
-from src.pick_ticket import build_pick_ticket_text, load_inventory_lookup
-from src.sqs_consumer import delete_message, receive_messages
-
-
-class StopWorker(Exception):
-    pass
+from src.sqs_consumer import consume_messages
 
 
-def append_ticket(output_path, ticket_text):
-    path = Path(output_path)
-    with path.open("a", encoding="utf-8") as f:
-        f.write(ticket_text)
-        if not ticket_text.endswith("\n"):
-            f.write("\n")
-        f.write("\n")
+DEFAULT_STATE_FILE = 'pick-ticket-worker-state.json'
+DEFAULT_TICKET_FILE = 'pick-tickets.txt'
 
 
-def process_pick_work_message(message_obj, inventory_lookup, output_path):
-    ticket_text = build_pick_ticket_text(message_obj, inventory_lookup)
-    append_ticket(output_path, ticket_text)
-    print(
-        f"wrote pick ticket orderId={message_obj.get('orderId')} lines={len(message_obj.get('lines', []))} output={output_path}",
-        flush=True,
+def load_state(path: Path) -> set[str]:
+    if not path.exists():
+        return set()
+    payload = json.loads(path.read_text(encoding='utf-8'))
+    return set(payload.get('processed_command_ids', []))
+
+
+def save_state(path: Path, processed: set[str]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {'processed_command_ids': sorted(processed)}
+    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + '\n', encoding='utf-8')
+
+
+def format_ticket(work: dict[str, Any]) -> str:
+    return (
+        f"command_id={work['command_id']} "
+        f"order_id={work['order_id']} "
+        f"sku={work['sku']} "
+        f"description={work.get('description', 'unknown item')} "
+        f"quantity={work['quantity']} "
+        f"bin={work['bin']}"
     )
-    return ticket_text
 
 
-def process_sqs_message(sqs_message, inventory_lookup, output_path, ack=False):
-    message_id = sqs_message.get("MessageId")
-    receipt_handle = sqs_message.get("ReceiptHandle")
-    body_text = sqs_message.get("Body", "")
-    print(f"received messageId={message_id}", flush=True)
+def append_ticket(ticket_path: Path, line: str) -> None:
+    ticket_path.parent.mkdir(parents=True, exist_ok=True)
+    with ticket_path.open('a', encoding='utf-8') as handle:
+        handle.write(line + '\n')
+
+
+def build_arg_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description='Long-running pick-ticket worker')
+    parser.add_argument('queue_url')
+    parser.add_argument('ticket_file')
+    parser.add_argument('--state-file', default=DEFAULT_STATE_FILE)
+    parser.add_argument('--once', action='store_true', help='Poll once and exit after the batch is handled')
+    parser.add_argument('--wait-time-seconds', type=int, default=20)
+    parser.add_argument('--max-number-of-messages', type=int, default=10)
+    return parser
+
+
+def main(argv: list[str], stop_flag: dict[str, bool] | None = None) -> int:
+    """Run the worker. stop_flag is a shared {'stop': bool} mapping so callers (and tests) can end service mode."""
+    args = build_arg_parser().parse_args(argv[1:])
+    ticket_path = Path(args.ticket_file)
+    state_path = Path(args.state_file)
+    processed = load_state(state_path)
+    if stop_flag is None:
+        stop_flag = {'stop': False}
+
+    def request_stop(_signum, _frame):
+        stop_flag['stop'] = True
+
+    signal.signal(signal.SIGINT, request_stop)
+    signal.signal(signal.SIGTERM, request_stop)
+
+    def handle_message(work: dict[str, Any], _received: Any) -> None:
+        command_id = work['command_id']
+        if command_id in processed:
+            return
+        ticket = format_ticket(work)
+        append_ticket(ticket_path, ticket)
+        print(ticket)
+        processed.add(command_id)
+        save_state(state_path, processed)
+
     try:
-        message_obj = json.loads(body_text)
-        process_pick_work_message(message_obj, inventory_lookup, output_path)
-    except Exception as exc:
-        print(f"failed messageId={message_id}: {exc}", file=sys.stderr, flush=True)
-        return False
-
-    if ack and receipt_handle:
-        delete_message(receipt_handle)
-        print(f"acknowledged messageId={message_id}", flush=True)
-    else:
-        print(f"left messageId={message_id} on queue for retry", flush=True)
-    return True
-
-
-def run_once_from_file(message_file, inventory_lookup, output_path):
-    message_obj = json.loads(Path(message_file).read_text(encoding="utf-8"))
-    process_pick_work_message(message_obj, inventory_lookup, output_path)
+        while True:
+            consume_messages(
+                args.queue_url,
+                handle_message,
+                wait_time_seconds=args.wait_time_seconds,
+                max_number_of_messages=args.max_number_of_messages,
+            )
+            if args.once or stop_flag['stop']:
+                break
+    except KeyboardInterrupt:
+        stop_flag['stop'] = True
     return 0
 
 
-def run_forever(inventory_lookup, output_path, poll_seconds=2, ack=True):
-    stop_requested = {"value": False}
-
-    def handle_signal(signum, frame):
-        stop_requested["value"] = True
-        print(f"received signal {signum}, shutting down worker", flush=True)
-
-    signal.signal(signal.SIGINT, handle_signal)
-    signal.signal(signal.SIGTERM, handle_signal)
-
-    print(f"starting pick-ticket worker output={output_path} ack={ack}", flush=True)
-    while not stop_requested["value"]:
-        try:
-            messages = receive_messages(max_messages=1, visibility_timeout=30, wait_time=0)
-        except Exception as exc:
-            print(f"worker poll error: {exc}", file=sys.stderr, flush=True)
-            time.sleep(poll_seconds)
-            continue
-
-        if not messages:
-            print("no messages available", flush=True)
-            time.sleep(poll_seconds)
-            continue
-
-        for message in messages:
-            process_sqs_message(message, inventory_lookup, output_path, ack=ack)
-
-    print("worker stopped", flush=True)
-    return 0
-
-
-def main(argv):
-    parser = argparse.ArgumentParser(description="TinyWMS pick-ticket worker")
-    parser.add_argument("--output", default="pick-tickets.txt", help="path to appended pick-ticket text file")
-    parser.add_argument("--inventory", default="data/inventory.json", help="inventory JSON used for SKU description and bin lookup")
-    parser.add_argument("--message-file", help="process one local pick-work JSON file instead of polling SQS")
-    parser.add_argument("--once", action="store_true", help="required together with --message-file for local one-shot processing")
-    parser.add_argument("--poll-seconds", type=int, default=2, help="seconds to sleep between empty polls or poll errors")
-    parser.add_argument("--no-ack", action="store_true", help="leave processed SQS messages on the queue for retry")
-    args = parser.parse_args(argv[1:])
-
-    inventory_lookup = load_inventory_lookup(args.inventory)
-
-    if args.message_file:
-        if not args.once:
-            print("--message-file requires --once", file=sys.stderr)
-            return 2
-        return run_once_from_file(args.message_file, inventory_lookup, args.output)
-
-    return run_forever(inventory_lookup, args.output, poll_seconds=args.poll_seconds, ack=not args.no_ack)
-
-
-if __name__ == "__main__":
+if __name__ == '__main__':
     raise SystemExit(main(sys.argv))

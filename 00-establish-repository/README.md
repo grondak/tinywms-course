@@ -1,28 +1,26 @@
 # TinyWMS
 
-TinyWMS is a teaching repository for learning Linux, Python, JSON, HTTP, AWS, SQL, distributed systems, events, and containers.
+TinyWMS is a semester-long warehouse-management teaching repository. This stage only establishes the repository scaffold and the teaching documents that future lessons will expand.
 
-This first stage establishes the repository shape only. There is no application code yet.
+## What exists in this stage
+- A place for architecture notes in `docs/`.
+- A place for sample data and later contracts in `data/`.
+- A place for Python source in `src/`.
+- A place for tests in `tests/`.
 
-## Repository layout
-- `README.md` - course overview and future stage guidance
-- `docs/` - architecture and contract notes
-- `data/` - sample data and JSON examples in later stages
-- `src/` - application code in later stages
-- `tests/` - automated tests in later stages
+## What does not exist yet
+- No runnable application.
+- No HTTP server.
+- No browser UI.
+- No database.
+- No AWS resources.
 
-## Current status
-- No runnable application exists yet.
-- Later stages will add the JSON contracts, CLI tools, HTTP servers, browser code, AWS deployment, and database persistence.
+Later stages will add the JSON inventory model, Linux-visible command-line programs, HTTP, browser code, deployment guides, relational persistence, queues, events, workers, containers, and cloud deployment artifacts.
 
-## Stage README expectation for future lessons
-When a later stage becomes runnable, its README must be a lesson guide that includes:
-- purpose
-- file map
-- exact run commands
-- exact test commands
-- student exercises
-- cleanup notes when files, processes, or cloud resources are created
-- a continuity note describing the inherited contract and the boundary that changed
+## Repository teaching notes
+- JSON will be the canonical interchange format.
+- Later stages will preserve contracts so students can compare one lesson to the next.
+- The architecture and data-contract documents in `docs/` will be updated as the course evolves.
 
-Placeholder text like "generated app from ..." is not acceptable for runnable stages.
+## Continuity note for future stages
+Future runnable stages must provide lesson-focused READMEs with purpose, file map, run/test commands, exercises, cleanup notes, continuity notes, and a component assembly update.

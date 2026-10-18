@@ -1,63 +1,69 @@
-# TinyWMS architecture
+# TinyWMS Architecture
 
 ## Current architecture
-- TinyWMS still has a Lambda inventory path that reads from Amazon RDS and returns the established inventory JSON contract.
-- This stage adds a second Lambda/API boundary: `POST /orders`.
-- The new order path validates JSON, starts a database transaction, creates relational order rows, decrements inventory, and either commits all changes or rolls them all back.
-- The earlier Raspberry Pi, EC2, browser, and relational database lessons still matter because students can compare a simple Linux file-based path with a cloud-backed transactional path.
 
-## Deployment variants
-### Raspberry Pi Linux
-- The Pi variant still demonstrates a visible Linux process serving JSON directly.
-- It remains useful as the simplest place to compare request, response, files, process, and port behavior.
-
-### EC2 Linux
-- EC2 still runs the same HTTP application with the same `/inventory` response contract.
-- The student manages the instance, process, and port.
-
-### Browser client
-- The browser still expects the same inventory JSON and renders SKU, description, bin, and quantity.
-- The browser now also contains a plain HTML order form that builds an order JSON request and sends it to `/orders`.
-- Failures should stay visible to students as HTTP status codes and JSON error bodies.
-
-### Lambda reading and writing RDS
-- Lambda now handles both `GET /inventory` and `POST /orders`.
-- For `GET /inventory`, Lambda connects to RDS, reads relational rows, and converts them into the established inventory JSON contract.
-- For `POST /orders`, Lambda validates the request, inserts into `orders` and `order_lines`, decrements `inventory_locations`, and commits only if all lines can be satisfied.
-- AWS is responsible for Lambda execution and RDS hosting, while students still control schema, SQL, credentials, and cost cleanup.
-
-### RDS
-- RDS continues to host the same `products` and `inventory_locations` tables.
-- This stage adds `orders` and `order_lines` without changing the meaning of the existing inventory tables.
-- RDS becomes the source of truth both for inventory reads and for committed order history.
-
-## What stayed the same
-- The inventory JSON field names and meanings stayed the same.
-- `GET /inventory` remains compatible with the browser and previous tests.
-- The relational product and inventory meaning stayed the same.
-- The browser inventory table does not need a data-model change.
-
-## What changed in this stage
-- TinyWMS gained an order JSON contract and a `POST /orders` HTTP path.
-- Lambda now performs database writes as well as reads.
-- Transaction boundaries matter visibly: a failed order must not leave partial rows or partial inventory decrements behind.
-
-## Failure and recovery notes
-- If Lambda cannot reach RDS, the handler should fail visibly rather than pretending an order succeeded.
-- If the order JSON is malformed or incomplete, the request should fail with a clear client error.
-- If inventory is insufficient, the request should fail cleanly and the transaction should roll back.
-- Students can recover by checking database endpoint, security group, credentials, schema, and seed data, then re-running the order request.
+TinyWMS now has nine visible teaching boundaries: the Stage 1 inventory JSON contract and CLI, the Stage 2 Linux-visible demo tools, the Stage 3 HTTP server that exposes the same inventory JSON over HTTP, the Stage 4 browser page that fetches that same JSON contract, the Stage 5 EC2 deployment wrapper that starts the same HTTP server on a different Linux host, the Stage 6 Lambda inventory handler that returns the same inventory JSON from AWS Lambda, the Stage 7 API Gateway front door that routes HTTP to Lambda, the Stage 8 relational persistence lesson that maps the same inventory model into SQL, the Stage 9 RDS lesson that moves the PostgreSQL database hosting boundary into AWS, and Stage 10’s Lambda-to-RDS evolution that changes Lambda’s inventory source from static JSON to database rows without changing the outward inventory JSON contract. The inventory JSON contract remains the canonical data shape; later consumers and deployment steps reuse it rather than replacing it.
 
 ## Architecture History
+
 - Stage 0: repository scaffold only.
-- Stage 1: JSON inventory contract and CLI reader.
-- Stage 2: Linux-visible command-line examples.
-- Stage 3: Raspberry Pi / EC2-style HTTP server added.
-- Stage 4: browser client added.
-- Stage 5: EC2 deployment scripts and documentation added without changing the app contract.
-- Stage 6: Lambda implementation added alongside the existing Linux server path.
-- Stage 7: API Gateway added in front of Lambda without changing the inventory contract.
-- Stage 8: relational schema and JSON-to-table mapping added while preserving the existing inventory contract.
-- Stage 9: Amazon RDS added as a managed deployment option for the same relational schema.
-- Stage 10: Lambda reads inventory from RDS and maps rows back into the unchanged inventory JSON contract.
-- Stage 11: Lambda also accepts orders, writes `orders` and `order_lines`, decrements inventory transactionally, and rolls back cleanly on insufficient stock.
+- Stage 1: inventory JSON contract and CLI backbone added.
+- Stage 2: Linux-visible demo tools added to make shell, file, and process behavior observable.
+- Stage 3: HTTP server added to expose the existing inventory JSON contract over a visible request/response boundary.
+- Stage 4: browser inventory page added as another consumer of the same inventory JSON contract.
+- Stage 5: EC2 deployment wrapper added as an operations boundary around the same HTTP server and browser assets.
+- Stage 6: Lambda inventory handler added as an additional compute boundary for the same inventory JSON contract.
+- Stage 7: API Gateway added as the HTTP front door for the Lambda path.
+- Stage 8: relational inventory schema, adapter, and initializer added as a SQL representation of the inventory contract.
+- Stage 9: RDS added as the managed PostgreSQL hosting and operations boundary for the relational lesson.
+- Stage 10: Lambda now reads inventory from the relational database instead of static JSON in the deployed path.
+
+## Component Assembly Map
+
+| component name | stage introduced | runtime location | inbound contract | outbound contract | dependencies |
+| --- | --- | --- | --- | --- | --- |
+| inventory JSON file | 01-json-backbone | filesystem (`data/inventory.json`) | none | inventory JSON | none |
+| inventory CLI | 01-json-backbone | Linux Python process (`src/inventory_cli.py`) | inventory JSON | printed list output, JSON dump, exit code | inventory JSON file |
+| Linux-visible helper | 02-linux-visible | Linux Python process (`src/linux_visible.py`) | stdin, argv, environment variables | stdout, stderr, exit code | standard library, shell-provided stdin/stdout/stderr |
+| inventory watcher | 02-linux-visible | Linux Python process (`src/inventory_watcher.py`) | inventory JSON file path, log-file path | repeated JSON snapshots in log file, visible long-running process | inventory JSON file, filesystem append access |
+| HTTP inventory server | 03-pi-http-server | Linux Python process (`src/http_server.py`) on Raspberry Pi Linux or EC2 Linux | HTTP `GET /inventory`, environment variable for port, inventory JSON file path | HTTP response with status, headers, and inventory JSON body | inventory JSON file, Python standard library HTTP server |
+| browser inventory page | 04-browser | browser (`src/web/index.html`, `src/web/app.js`, `src/web/style.css`) | HTTP `GET /inventory`, browser DOM, optional runtime API base override | rendered HTML table and visible error text | HTTP inventory server, inventory JSON contract, browser `fetch()` |
+| EC2 deployment wrapper | 05-ec2-deployment | EC2 Linux host (`deploy/ec2/README.md`, `deploy/ec2/run_inventory_server.sh`) | SSH session, shell environment variables, repository checkout | running HTTP server process on the chosen port | HTTP inventory server, inventory JSON file, EC2 Linux shell |
+| Lambda inventory handler | 06-lambda | AWS Lambda (`src/lambda_inventory.py`) | Lambda event input for inventory requests | Lambda response carrying inventory JSON | inventory JSON file, Python standard library JSON and environment handling |
+| API Gateway front door | 07-api-gateway | AWS API Gateway (`infra/api-gateway.yaml`, `deploy/api-gateway/README.md`) | HTTP `GET /inventory` from clients | HTTP proxy request into Lambda and HTTP response back to the caller | Lambda inventory handler, Lambda invoke permission |
+| relational inventory schema | 08-relational-persistence | SQL files and database process (`data/schema.sql`, `data/seed.sql`, `data/init_db.py`, `src/db_adapter.py`, `src/sql_export.py`) | inventory JSON file and `TINYWMS_DB` / `TINYWMS_SQLITE_PATH` environment variables | `inventory` table rows seeded from the JSON sample | inventory JSON file, SQLite or PostgreSQL backend, lazy PostgreSQL driver import |
+| RDS deployment wrapper | 09-rds | AWS RDS / CloudFormation (`infra/rds.yaml`, `deploy/rds/README.md`) | CloudFormation parameters for DB name, credentials, subnet IDs, and security groups | RDS endpoint address and port outputs | relational inventory schema, AWS RDS, CloudFormation |
+| Lambda database-backed inventory handler | 10-lambda-rds | AWS Lambda (`src/lambda_inventory.py`) | Lambda event input for inventory requests, PostgreSQL connection settings from environment | Lambda response carrying inventory JSON mapped from database rows | Lambda inventory handler, relational schema, RDS deployment wrapper, database adapter |
+
+## Component evolution timeline
+
+- Stage 1 introduced the inventory JSON file and inventory CLI.
+- Stage 2 reused the inventory contract and added Linux-visible process/file demos.
+- Stage 3 reused the same inventory data and added the HTTP inventory server.
+- Stage 4 reused the HTTP server contract and added the browser inventory page.
+- Stage 5 reused the HTTP inventory server and added EC2 deployment instructions.
+- Stage 6 reused the inventory contract and added the Lambda inventory handler.
+- Stage 7 reused the Lambda inventory handler and added API Gateway as the HTTP front door.
+- Stage 8 reuses the inventory JSON contract and adds SQL schema, seed, adapter, and initializer components.
+- Stage 9 reuses the relational persistence components and adds the managed RDS hosting boundary.
+- Stage 10 reuses the Lambda component and changes only its data-source dependency, which now points at the relational/RDS path.
+
+## Data contract mapping
+
+The inventory JSON object fields map directly to the relational inventory table:
+
+- `sku` -> `inventory.sku`
+- `description` -> `inventory.description`
+- `bin_location` -> `inventory.bin_location`
+- `quantity` -> `inventory.quantity`
+- `unit` -> `inventory.unit`
+
+The SQL schema keeps `bin_location` as the canonical column name so the lesson can compare the JSON key and SQL column directly. The seed script is derived from `data/inventory.json` and keeps the same sample rows visible to students.
+
+## Notes on the current stage
+
+- The SQLite branch exists only as a local teaching path and does not represent a database server process with a network port.
+- The PostgreSQL branch remains the default so later lessons can demonstrate a real database service, row locking, and operational deployment.
+- RDS changes the hosting and operations responsibility, not the logical relational schema.
+- Lambda now uses the relational database for its deployed inventory path, but the browser, HTTP server, CLI, and contract files still speak the same inventory JSON.
+- Students can compare self-managed Linux database setup with AWS-managed database setup without changing the inventory contract.

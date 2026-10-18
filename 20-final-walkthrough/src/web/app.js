@@ -1,71 +1,95 @@
-function inventoryUrl(baseUrl) {
-  return `${baseUrl.replace(/\/$/, '')}/inventory`;
+const apiBase = window.TINYWMS_API_BASE_URL || window.location.origin;
+const inventoryUrl = new URL('/inventory', apiBase).toString();
+const ordersUrl = new URL('/orders', apiBase).toString();
+const status = document.getElementById('status');
+const body = document.getElementById('inventory-body');
+const error = document.getElementById('error');
+const form = document.getElementById('order-form');
+const orderJson = document.getElementById('order-json');
+const submitStatus = document.getElementById('submit-status');
+const refreshButton = document.getElementById('refresh-button');
+const apiBaseLabel = document.getElementById('api-base');
+const responseJson = document.getElementById('response-json');
+
+apiBaseLabel.textContent = apiBase;
+
+function renderInventory(items) {
+  status.textContent = `Loaded ${items.length} items`;
+  body.innerHTML = items
+    .map(
+      (item) => `
+        <tr>
+          <td>${item.sku}</td>
+          <td>${item.description}</td>
+          <td>${item.bin_location}</td>
+          <td data-sku="${item.sku}">${item.quantity}</td>
+          <td>${item.unit}</td>
+        </tr>`,
+    )
+    .join('');
 }
 
-function ordersUrl(baseUrl) {
-  return `${baseUrl.replace(/\/$/, '')}/orders`;
-}
-
-async function loadInventory() {
-  const status = document.getElementById('status');
-  const body = document.getElementById('inventory-body');
-  const baseUrl = document.getElementById('base-url').value;
-  try {
-    const response = await fetch(inventoryUrl(baseUrl));
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`);
-    }
-    const data = await response.json();
-    body.innerHTML = '';
-    for (const item of data.inventory) {
-      const row = document.createElement('tr');
-      row.innerHTML = `<td>${item.sku}</td><td>${item.description}</td><td>${item.bin}</td><td>${item.quantity} ${item.unit}</td>`;
-      body.appendChild(row);
-    }
-    status.textContent = `Loaded ${data.inventory.length} products from ${baseUrl}.`;
-  } catch (error) {
-    status.textContent = `Failed to load inventory from ${baseUrl}: ${error.message}`;
-  }
-}
-
-function orderPayloadFromForm() {
-  return {
-    customer: document.getElementById('order-customer').value,
-    lines: [
-      {
-        sku: document.getElementById('order-sku').value,
-        quantity: Number(document.getElementById('order-quantity').value)
+function loadInventory() {
+  error.textContent = '';
+  return fetch(inventoryUrl)
+    .then((response) => {
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
       }
-    ]
+      return response.json();
+    })
+    .then(renderInventory)
+    .catch((err) => {
+      status.textContent = 'Failed to load inventory';
+      error.textContent = err.message;
+    });
+}
+
+function defaultOrder() {
+  return {
+    order_id: `ORD-${Date.now()}`,
+    lines: [{ sku: 'SKU-1001', quantity: 1 }],
   };
 }
 
-async function submitOrder() {
-  const result = document.getElementById('order-result');
-  const payloadEl = document.getElementById('order-json');
-  const baseUrl = document.getElementById('base-url').value;
-  const payload = orderPayloadFromForm();
-  payloadEl.textContent = JSON.stringify(payload, null, 2);
-
-  try {
-    const response = await fetch(ordersUrl(baseUrl), {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Accept': 'application/json'
-      },
-      body: JSON.stringify(payload)
-    });
-    const data = await response.json();
-    result.textContent = `HTTP ${response.status}\n${JSON.stringify(data, null, 2)}`;
-    if (response.ok) {
-      await loadInventory();
-    }
-  } catch (error) {
-    result.textContent = `Order request failed: ${error.message}`;
-  }
+function syncEditor() {
+  orderJson.value = JSON.stringify(defaultOrder(), null, 2);
 }
 
-document.getElementById('reload-button').addEventListener('click', loadInventory);
-document.getElementById('submit-order-button').addEventListener('click', submitOrder);
+function submitOrder(event) {
+  event.preventDefault();
+  submitStatus.textContent = 'Submitting order...';
+  error.textContent = '';
+  responseJson.textContent = '';
+  let payload;
+  try {
+    payload = JSON.parse(orderJson.value);
+  } catch (err) {
+    submitStatus.textContent = 'Order JSON is invalid';
+    error.textContent = err.message;
+    return;
+  }
+  fetch(ordersUrl, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+    .then(async (response) => {
+      const responseBody = await response.json();
+      responseJson.textContent = JSON.stringify(responseBody, null, 2);
+      if (!response.ok) {
+        throw new Error(responseBody.error || `HTTP ${response.status}`);
+      }
+      submitStatus.textContent = `Accepted ${responseBody.order_id}`;
+      await loadInventory();
+    })
+    .catch((err) => {
+      submitStatus.textContent = 'Order rejected';
+      error.textContent = err.message;
+    });
+}
+
+refreshButton.addEventListener('click', loadInventory);
+form.addEventListener('submit', submitOrder);
+syncEditor();
 loadInventory();

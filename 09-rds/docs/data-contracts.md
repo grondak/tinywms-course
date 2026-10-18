@@ -1,40 +1,51 @@
-# TinyWMS data contracts
+# TinyWMS Data Contracts
 
-## Inventory JSON document
-TinyWMS uses one top-level JSON object containing an `inventory` array.
+This document describes the TinyWMS inventory JSON contract and how Stage 8 maps that contract into relational structures, with Stage 9 moving the PostgreSQL hosting boundary to RDS.
+
+## Inventory JSON
+
+Inventory is stored as a JSON array of objects. Each object represents one stock item and is reused by the CLI, the Linux demo tools, the HTTP server, the browser page, the EC2 deployment wrapper, and the Lambda handler.
 
 ### Fields
-- `inventory` - array of product records
-- `inventory[].sku` - stable product identifier used by CLI, HTTP, browser, Lambda, API Gateway, and relational mapping examples
-- `inventory[].description` - human-readable product description
-- `inventory[].bin` - warehouse bin or shelf location
-- `inventory[].quantity` - on-hand count as a non-negative integer
-- `inventory[].unit` - unit of measure such as `each`, `box`, or `case`
+- `sku` - unique stock keeping unit string used to identify the item.
+- `description` - human-readable item description.
+- `bin_location` - warehouse bin identifier where the item is stored.
+- `quantity` - on-hand count stored as a non-negative integer.
+- `unit` - quantity unit string such as `each` or `roll`.
 
-## Relational mapping
-The relational lesson keeps the same inventory meaning but stores it in tables.
+### Notes
+- The CLI validates that these required fields are present before it lists or finds items.
+- The HTTP server returns this same JSON structure unchanged at `GET /inventory`.
+- The browser page fetches the same JSON structure and renders it as a table.
+- The EC2 deployment wrapper does not change the JSON contract; it only changes where the same HTTP process is started.
+- The Lambda handler returns the same inventory JSON contract from a different compute boundary.
+- The JSON file remains the canonical interchange format for this stage.
 
-### Table: `products`
-- `sku` - primary key, copied from `inventory[].sku`
-- `description` - copied from `inventory[].description`
-- `unit` - copied from `inventory[].unit`
+## Relational mapping introduced in Stage 8
 
-### Table: `inventory_locations`
-- `sku` - foreign key to `products.sku`
-- `bin` - copied from `inventory[].bin`
-- `quantity` - copied from `inventory[].quantity`
+Stage 8 introduces a minimal relational representation for the existing inventory JSON data. The mapping is intentionally one-to-one so students can compare the two forms without extra abstraction.
 
-### RDS note
-When the database is moved to Amazon RDS, the table structure and mapping do not change. Only the operational home of the same schema changes.
+### Table: `inventory`
+- `sku TEXT PRIMARY KEY` - maps from `sku`.
+- `description TEXT NOT NULL` - maps from `description`.
+- `bin_location TEXT NOT NULL` - maps from `bin_location`.
+- `quantity INTEGER NOT NULL CHECK (quantity >= 0)` - maps from `quantity`.
+- `unit TEXT NOT NULL` - maps from `unit`.
 
-### Optional order tables
-Later lessons may add orders and order lines. This stage does not require them yet, but the schema is intentionally organized so that future order rows can reference `products` without changing the basic product contract.
+### Seed source
+The seed script is derived from `data/inventory.json` and loads the same sample rows into the relational table. The row values should match the JSON file exactly so students can compare file output, SQL inserts, and database contents.
 
-## JSON-to-table mapping notes
-- One JSON inventory item becomes one `products` row and one `inventory_locations` row.
-- The JSON document itself remains the teaching contract for the application boundary.
-- SQL is used only for persistence in this stage; HTTP and Lambda still speak the same JSON as before.
+### Database selection
+- `TINYWMS_DB=sqlite` selects the local classroom path.
+- `TINYWMS_DB=postgres` selects the PostgreSQL path and remains the default.
+- `TINYWMS_SQLITE_PATH` chooses the SQLite database file when the SQLite path is selected.
 
-## Notes
-- The model stays intentionally small so beginning students can understand it immediately.
-- Later stages must preserve this JSON meaning unless a lesson explicitly says otherwise.
+### Stage 9 RDS note
+RDS does not change the logical schema. It changes who operates the PostgreSQL server and where the endpoint comes from.
+
+- In the self-managed Linux path, students and instructors are responsible for installing, starting, securing, and stopping the database process.
+- In the RDS path, AWS operates the database process, storage, backups, endpoint lifecycle, and patching responsibilities within the scope of the lesson.
+- The application still speaks the same SQL schema and reads the same visible relational columns.
+
+### Teaching note
+SQLite is used here to make the lesson runnable on a student laptop, but it is still a local file-backed database. It does not demonstrate a separate database server process, network port, or row-locking behavior. PostgreSQL remains the path for instructor demonstrations of the later operational lessons, and RDS is the managed hosting version of that PostgreSQL path.

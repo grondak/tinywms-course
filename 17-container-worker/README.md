@@ -1,98 +1,51 @@
 # TinyWMS lesson: 17-container-worker
 
 ## Stage purpose
-This stage packages only the existing pick-ticket worker into a Docker image. The goal is to show that the same Python Linux process can run either directly on a host or inside a container, while keeping environment variables, stdout/stderr, input JSON, and the persistent output file visible.
+This stage shows the pick-ticket worker running inside Docker while keeping the same queue command contract and durable ticket/idempotency state from the earlier Linux and systemd lessons. The point is to teach containers as a new runtime wrapper for the same worker process, not to redesign TinyWMS.
 
 ## Files in this lesson
-- `Dockerfile.worker` - small Docker image definition for the pick-ticket worker
-- `deploy/container/run-worker-container.sh` - helper script that runs the worker container with visible environment variables and a mounted output directory
-- `src/pick_ticket_worker.py` - same worker logic as the previous stage, now also able to read its output path from an environment variable for container demos
-- `docs/architecture.md` - updated to describe the worker container as an additional execution option without replacing the existing Linux process path
-- `docs/data-contracts.md` - updated to note that containerization does not change the pick-work JSON or pick-ticket text contracts
-- `tests/test_pick_ticket_worker.py` - expanded tests for the new environment-variable-driven output path behavior
+- `README.md` - lesson guide for building, running, testing, and observing the containerized worker.
+- `docs/architecture.md` - updated component map showing the container runtime as an alternate worker execution environment.
+- `deploy/container-worker/README.md` - operator guide with exact `docker build` and `docker run` commands, mounts, and cleanup steps.
+- `src/Dockerfile` - image definition for the worker process and its default command.
+- `tests/test_container_worker.py` - checks the Dockerfile, the deploy guide, and the worker entrypoint/arguments contract.
+- `src/pick_ticket_worker.py` - reused worker process that still owns the queue-to-ticket behavior.
+- `src/sqs_consumer.py` - reused queue receive/delete helper used by the worker.
 
 ## Run the lesson
-From this folder:
+From the repository root:
 ```bash
-python3 -m unittest discover -s tests
-node --test tests/test_web_app.js
+python3 -m unittest discover -s tests -v
 ```
 
-Run the worker directly on the host as before:
+To inspect the container image directly:
 ```bash
-rm -f pick-tickets.txt
-python3 src/pick_ticket_worker.py --once --message-file data/pick-work-message-example.json --output pick-tickets.txt
-cat pick-tickets.txt
-```
-
-Build the worker image:
-```bash
-docker build -f Dockerfile.worker -t tinywms-pick-ticket-worker:lesson .
-```
-
-Run one message through the worker in a container and persist output on the host:
-```bash
-rm -rf container-output
-mkdir -p container-output
-docker run --rm \
-  -e TINYWMS_PICK_TICKETS_PATH=/work/output/pick-tickets.txt \
-  -v "$(pwd)/container-output:/work/output" \
-  tinywms-pick-ticket-worker:lesson \
-  --once --message-file data/pick-work-message-example.json
-cat container-output/pick-tickets.txt
-```
-
-Run the long-lived worker container against SQS with a mounted output volume:
-```bash
-mkdir -p container-output
-docker run --rm \
-  -e AWS_REGION=us-east-1 \
-  -e TINYWMS_SQS_QUEUE_URL=https://sqs.us-east-1.amazonaws.com/123456789012/tinywms-pick-work \
-  -e TINYWMS_PICK_TICKETS_PATH=/work/output/pick-tickets.txt \
-  -v "$(pwd)/container-output:/work/output" \
-  tinywms-pick-ticket-worker:lesson \
-  --poll-seconds 2
-```
-
-Watch the persistent output file from the host:
-```bash
-tail -f container-output/pick-tickets.txt
-```
-
-Or use the helper wrapper:
-```bash
-mkdir -p container-output
-TINYWMS_PICK_TICKETS_PATH=/work/output/pick-tickets.txt \
-./deploy/container/run-worker-container.sh --once --message-file data/pick-work-message-example.json
+docker build -f src/Dockerfile -t tinywms-pick-ticket-worker .
 ```
 
 ## Run tests
 ```bash
-python3 -m unittest discover -s tests
 node --test tests/test_web_app.js
 ```
 
-## Student exercises
-1. Edit `Dockerfile.worker` to add `ENV PYTHONUNBUFFERED=1`, rebuild the image, and compare the container log behavior with the host-run worker.
-2. Change the mounted host directory from `container-output` to a new folder, rerun the container, and verify that the pick ticket appears in the new host path without changing the JSON message contract.
+```bash
+python3 -m unittest discover -s tests -v
+```
 
+## Student exercises
+1. Change the worker formatting in `src/pick_ticket_worker.py`, rebuild the image, and run the container once to see the new ticket line appear in the mounted `pick-tickets.txt` file.
+2. Edit the default command in `src/Dockerfile` or the run command in `deploy/container-worker/README.md`, then rebuild and run the bounded `--once` example to observe how Docker passes arguments to the worker process.
 ## Continuity note
-- Inherited contract: the worker still consumes the same `PickWorkRequested` JSON message and still appends the same human-readable pick-ticket text
-- Boundary changed in this stage: the worker can now run inside a Docker container image instead of only as a direct Linux host process
+- Inherited contract: the pick-work command JSON, pick-ticket output, and worker idempotency behavior remain valid.
+- Boundary changed in this stage: the same worker process can now run inside a Docker container with explicit image, container, environment-variable, and volume boundaries.
+
+## Component assembly update
+- Added: `src/Dockerfile`, `deploy/container-worker/README.md`, and `tests/test_container_worker.py` as the container lesson artifacts.
+- Reused unchanged: `src/pick_ticket_worker.py`, `src/sqs_consumer.py`, `docs/architecture.md` component names from earlier stages, and the existing pick-work/pick-ticket contracts.
+- Replaced/evolved: the worker runtime is now documented as containerized in addition to the bare Linux and systemd paths; the worker logic itself is unchanged.
 
 ## Cleanup
-Remove local output files:
 ```bash
-rm -f pick-tickets.txt
-rm -rf container-output
+docker rmi tinywms-pick-ticket-worker
+rm -f deploy/container-worker/pick-tickets.txt deploy/container-worker/pick-ticket-worker-state.json
 ```
-Stop and remove any running worker containers:
-```bash
-docker ps
-docker stop <container-id>
-```
-Remove the lesson image when finished:
-```bash
-docker rmi tinywms-pick-ticket-worker:lesson
-```
-No AWS resources are created by this stage, but a live SQS polling demo may use already-existing resources from earlier lessons.

@@ -1,162 +1,134 @@
 #!/usr/bin/env python3
+from __future__ import annotations
+
 import json
-import sqlite3
-import sys
-import tempfile
+import os
 import threading
 import time
+from dataclasses import dataclass
 from pathlib import Path
+from tempfile import TemporaryDirectory
+from typing import Any
 
-from src.rds_inventory import InsufficientInventoryError, create_order_with_connection
+from src.lambda_inventory import OrderLine, OrderRequest, place_order
 
-
-def setup_demo_db(db_path, quantity=1):
-    connection = sqlite3.connect(db_path)
-    connection.executescript(
-        f"""
-        CREATE TABLE products (
-            sku TEXT PRIMARY KEY,
-            description TEXT NOT NULL,
-            unit TEXT NOT NULL
-        );
-        CREATE TABLE inventory_locations (
-            sku TEXT NOT NULL,
-            bin TEXT NOT NULL,
-            quantity INTEGER NOT NULL,
-            PRIMARY KEY (sku, bin)
-        );
-        CREATE TABLE orders (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            customer TEXT NOT NULL,
-            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-        );
-        CREATE TABLE order_lines (
-            order_id INTEGER NOT NULL,
-            line_number INTEGER NOT NULL,
-            sku TEXT NOT NULL,
-            quantity INTEGER NOT NULL,
-            PRIMARY KEY (order_id, line_number)
-        );
-        INSERT INTO products VALUES ('SKU-RACE', 'Last item demo', 'each');
-        INSERT INTO inventory_locations VALUES ('SKU-RACE', 'R1-01', {int(quantity)});
-        """
-    )
-    connection.commit()
-    connection.close()
+ROOT = Path(__file__).resolve().parents[1]
+DEFAULT_INVENTORY = ROOT / 'data' / 'inventory.json'
 
 
-def remaining_quantity(db_path):
-    connection = sqlite3.connect(db_path)
-    quantity = connection.execute(
-        "SELECT quantity FROM inventory_locations WHERE sku = ?",
-        ("SKU-RACE",),
-    ).fetchone()[0]
-    connection.close()
-    return quantity
+@dataclass
+class DemoState:
+    inventory: dict[str, dict[str, Any]]
+    barrier: threading.Barrier
+    commits: int = 0
+    rollbacks: int = 0
+    log: list[str] = None
+
+    def __post_init__(self):
+        if self.log is None:
+            self.log = []
 
 
-def order_count(db_path):
-    connection = sqlite3.connect(db_path)
-    count = connection.execute("SELECT COUNT(*) FROM orders").fetchone()[0]
-    connection.close()
-    return count
+class DemoCursor:
+    def __init__(self, state: DemoState):
+        self.state = state
+        self.rowcount = 0
+        self._last_row = None
+
+    def execute(self, sql, params=None):
+        self.state.log.append(f'cursor.execute: {sql} {params!r}')
+        if sql == 'SELECT sku, description, bin_location, quantity, unit FROM inventory WHERE sku = %s FOR UPDATE':
+            sku = params[0]
+            self.state.log.append(f'lock requested for {sku}')
+            self.state.barrier.wait()
+            self._last_row = self.state.inventory.get(sku)
+            return
+        if sql == 'UPDATE inventory SET quantity = quantity - %s WHERE sku = %s AND quantity >= %s':
+            amount, sku, threshold = params
+            item = self.state.inventory.get(sku)
+            if item is not None and item['quantity'] >= threshold:
+                item['quantity'] -= amount
+                self.rowcount = 1
+                self.state.log.append(f'updated {sku} to {item["quantity"]}')
+            else:
+                self.rowcount = 0
+                self.state.log.append(f'update rejected for {sku}')
+            return
+        if sql == 'INSERT INTO orders (order_id, status) VALUES (%s, %s)':
+            self.state.log.append(f'order inserted {params!r}')
+            return
+        if sql == 'INSERT INTO order_lines (order_id, sku, quantity) VALUES (%s, %s, %s)':
+            self.state.log.append(f'order line inserted {params!r}')
+            return
+        if sql == 'BEGIN':
+            self.state.log.append('transaction begin')
+            return
+        raise AssertionError(f'unexpected SQL: {sql}')
+
+    def fetchone(self):
+        return self._last_row
+
+    def close(self):
+        self.state.log.append('cursor closed')
 
 
-def naive_worker(db_path, worker_name, barrier, results):
-    connection = sqlite3.connect(db_path, timeout=5, isolation_level=None)
-    cursor = connection.cursor()
-    cursor.execute("SELECT quantity FROM inventory_locations WHERE sku = ?", ("SKU-RACE",))
-    available = int(cursor.fetchone()[0])
-    barrier.wait()
-    if available < 1:
-        results.append({"worker": worker_name, "status": "failed", "available_seen": available})
-        connection.close()
-        return
-    time.sleep(0.1)
-    cursor.execute("UPDATE inventory_locations SET quantity = ? WHERE sku = ?", (available - 1, "SKU-RACE"))
-    cursor.execute("INSERT INTO orders (customer) VALUES (?)", (worker_name,))
-    connection.commit()
-    results.append({"worker": worker_name, "status": "created", "available_seen": available})
-    connection.close()
+class DemoConnection:
+    def __init__(self, state: DemoState):
+        self.state = state
+
+    def cursor(self):
+        return DemoCursor(self.state)
+
+    def commit(self):
+        self.state.commits += 1
+        self.state.log.append('commit')
+
+    def rollback(self):
+        self.state.rollbacks += 1
+        self.state.log.append('rollback')
+
+    def close(self):
+        self.state.log.append('connection closed')
 
 
-def run_naive_demo(db_path):
-    results = []
-    barrier = threading.Barrier(2)
-    threads = [
-        threading.Thread(target=naive_worker, args=(db_path, "worker-1", barrier, results)),
-        threading.Thread(target=naive_worker, args=(db_path, "worker-2", barrier, results)),
-    ]
-    for thread in threads:
-        thread.start()
-    for thread in threads:
-        thread.join()
-    return {
-        "mode": "naive",
-        "results": sorted(results, key=lambda item: item["worker"]),
-        "remainingQuantity": remaining_quantity(db_path),
-        "orderCount": order_count(db_path),
-    }
+def _load_demo_inventory() -> dict[str, dict[str, Any]]:
+    data = json.loads(DEFAULT_INVENTORY.read_text(encoding='utf-8'))
+    return {item['sku']: dict(item) for item in data}
 
 
-def fixed_worker(db_path, worker_name, results):
-    connection = sqlite3.connect(db_path, timeout=5, isolation_level=None)
+def _run_attempt(state: DemoState, order_id: str, quantity: int) -> None:
+    connection = DemoConnection(state)
+    order = OrderRequest(order_id=order_id, lines=[OrderLine(sku='SKU-1001', quantity=quantity, description='Blue widget')])
     try:
-        result = create_order_with_connection(
-            connection,
-            {
-                "customer": worker_name,
-                "lines": [{"sku": "SKU-RACE", "quantity": 1}],
-            },
-        )
-        results.append({"worker": worker_name, "status": result["status"]})
-    except InsufficientInventoryError as exc:
-        results.append(
-            {
-                "worker": worker_name,
-                "status": "failed",
-                "error": "insufficient inventory",
-                "requested": exc.requested,
-                "available": exc.available,
-            }
-        )
-    finally:
-        connection.close()
+        result = place_order(connection, order)
+        print(f'{order_id}: accepted -> {result}')
+    except Exception as exc:
+        print(f'{order_id}: rejected -> {exc}')
 
 
-def run_fixed_demo(db_path):
-    results = []
-    threads = [
-        threading.Thread(target=fixed_worker, args=(db_path, "worker-1", results)),
-        threading.Thread(target=fixed_worker, args=(db_path, "worker-2", results)),
-    ]
-    for thread in threads:
-        thread.start()
-    for thread in threads:
-        thread.join()
-    return {
-        "mode": "fixed",
-        "results": sorted(results, key=lambda item: item["worker"]),
-        "remainingQuantity": remaining_quantity(db_path),
-        "orderCount": order_count(db_path),
-    }
+def main() -> int:
+    inventory = _load_demo_inventory()
+    inventory['SKU-1001']['quantity'] = 1
+    state = DemoState(inventory=inventory, barrier=threading.Barrier(2))
+    print('starting concurrency demo with SKU-1001 quantity set to 1')
+    print('database backend is controlled by TINYWMS_DB, TINYWMS_SQLITE_PATH, and DATABASE_URL')
+    print('for the real row-lock lesson, use PostgreSQL as documented in deploy/rds/README.md')
 
+    first = threading.Thread(target=_run_attempt, args=(state, 'ORD-A', 1))
+    second = threading.Thread(target=_run_attempt, args=(state, 'ORD-B', 1))
+    first.start()
+    second.start()
+    first.join()
+    second.join()
 
-def main(argv):
-    if len(argv) != 2 or argv[1] not in {"naive", "fixed"}:
-        print("usage: concurrency_demo.py <naive|fixed>", file=sys.stderr)
-        return 2
-
-    with tempfile.TemporaryDirectory() as tmp:
-        db_path = str(Path(tmp) / "tinywms-concurrency.sqlite")
-        setup_demo_db(db_path, quantity=1)
-        if argv[1] == "naive":
-            result = run_naive_demo(db_path)
-        else:
-            result = run_fixed_demo(db_path)
-        print(json.dumps(result, indent=2, sort_keys=True))
+    print(f'commits: {state.commits}')
+    print(f'rollbacks: {state.rollbacks}')
+    print(f'final inventory: {json.dumps(inventory["SKU-1001"], sort_keys=True)}')
+    print('log:')
+    for line in state.log:
+        print(f'  {line}')
     return 0
 
 
-if __name__ == "__main__":
-    raise SystemExit(main(sys.argv))
+if __name__ == '__main__':
+    raise SystemExit(main())

@@ -1,0 +1,143 @@
+{
+  "current_stage": "11-orders",
+  "notes": [
+    {
+      "boundary_change": "",
+      "compacted": true,
+      "components_added": "",
+      "inherited_contract": "",
+      "stage": "00-establish-repository",
+      "summary": "Establish the TinyWMS repository scaffold and teaching docs with no runnable application yet."
+    },
+    {
+      "boundary_change": "TinyWMS now has a visible JSON file boundary and a Python CLI process boundary.",
+      "compacted": true,
+      "components_added": "",
+      "inherited_contract": "the repository scaffold and teaching-document structure from Stage 0 remain valid.",
+      "stage": "01-json-backbone",
+      "summary": "Define TinyWMS's initial JSON inventory contract and a small Python CLI that can load, validate, list, find, and emit inventory JSON. Add inherited Python test\u2026"
+    },
+    {
+      "boundary_change": "TinyWMS now exposes additional Linux process behavior through small demo tools, including stderr and exit codes, plus a long-running watcher process with a log\u2026",
+      "compacted": true,
+      "components_added": "",
+      "inherited_contract": "the inventory JSON file, schema, and CLI from Stage 1 remain valid and continue to define the data shape.",
+      "stage": "02-linux-visible",
+      "summary": "Extend the Stage 1 JSON backbone with small Linux-visible demo tools that make stdin, stdout, stderr, exit codes, environment variables, files, and long-runnin\u2026"
+    },
+    {
+      "boundary_change": "TinyWMS now exposes the inventory JSON over HTTP with an explicit listening port, request path, response status, headers, and body.",
+      "compacted": true,
+      "components_added": "",
+      "inherited_contract": "the inventory JSON file, schema, CLI, and Linux-visible helper scripts from earlier stages remain valid and unchanged.",
+      "stage": "03-pi-http-server",
+      "summary": "Add the smallest transparent Python HTTP server that serves the existing inventory JSON at GET /inventory on Raspberry Pi Linux and EC2 Linux. Preserve the Sta\u2026"
+    },
+    {
+      "boundary_change": "the browser becomes a new consumer of the same JSON contract and fetches inventory over HTTP instead of reading the file directly.",
+      "compacted": true,
+      "components_added": "",
+      "inherited_contract": "the inventory JSON file, schema, CLI, Linux-visible helpers, and HTTP `GET /inventory` response remain valid and unchanged.",
+      "stage": "04-browser",
+      "summary": "Add a plain HTML/CSS/JavaScript browser page that fetches GET /inventory and renders the existing inventory JSON contract as a table. Reuse the Stage 3 HTTP se\u2026"
+    },
+    {
+      "boundary_change": "hosting responsibility shifts from the Raspberry Pi teaching target to EC2 Linux deployment steps, but the application process and JSON contract stay the same.",
+      "compacted": true,
+      "components_added": "`deploy/ec2/README.md`, `deploy/ec2/environment.example`, and `deploy/ec2/run_inventory_server.sh` as the EC2 deploymen\u2026",
+      "inherited_contract": "the inventory JSON file, schema, CLI, Linux-visible tools, HTTP `GET /inventory` response, and browser inventory page remain compatible.",
+      "stage": "05-ec2-deployment",
+      "summary": "Add minimal EC2 deployment instructions for the existing HTTP inventory server without changing the application behavior. Reuse the Stage 4 inventory JSON, CLI\u2026"
+    },
+    {
+      "boundary_change": "AWS Lambda becomes an additional compute location for the same inventory contract, while the earlier Linux hosting path stays available.",
+      "components": {
+        "added": "`src/lambda_inventory.py`, `infra/lambda.yaml`, `deploy/lambda/README.md`, and `tests/test_lambda_inventory.py` as the new Lambda inventory component and its teaching safety net.",
+        "replaced_or_evolved": "`docs/architecture.md` and `docs/data-contracts.md` now document Lambda as a parallel compute boundary that preserves the same inventory JSON contract.",
+        "reused_unchanged": "`data/inventory.json`, `data/inventory.schema.json`, `src/http_server.py`, `src/inventory_cli.py`, `src/inventory_watcher.py`, `src/linux_visible.py`, `src/web/index.html`, `src/web/app.js`, `src/web/style.css`, `deploy/ec2/README.md`, `deploy/ec2/environment.example`, `deploy/ec2/run_inventory_server.sh`, `tests/test_http_server.py`, `tests/test_inventory_cli.py`, `tests/test_inventory_watcher.py`, `tests/test_linux_visible.py`, and `tests/test_web_app.js`."
+      },
+      "continuity_checks": [
+        "README file-map paths must exist in the stage snapshot.",
+        "Inherited contracts remain stable unless this stage prompt explicitly changes them."
+      ],
+      "inherited_contract": "the inventory JSON file, schema, CLI, Linux-visible helpers, HTTP `/inventory` response, browser inventory page, and EC2 deployment wrapper remain valid and unchanged.",
+      "stage": "06-lambda",
+      "summary": "Add an AWS Lambda inventory path in parallel with the existing Pi/EC2 HTTP path, keeping the same inventory JSON contract and preserving earlier components. Fix the missing blueprint-required source file by emitting the Lambda handler module itself, and add the Lambda deployment guide plus architecture/data-contract documentation updates for the new compute boundary."
+    },
+    {
+      "boundary_change": "API Gateway becomes the HTTP front door for the Lambda path, while the earlier Pi/EC2 direct HTTP path stays available for comparison.",
+      "components": {
+        "added": "`infra/api-gateway.yaml` and `deploy/api-gateway/README.md` as the API Gateway front-door component for the Lambda inventory path, plus `tests/test_web_app.js` as a browser-contract safety check.",
+        "replaced_or_evolved": "`docs/architecture.md` and `docs/data-contracts.md` now document API Gateway as the visible HTTP front door for the Lambda path without changing the inventory JSON contract.",
+        "reused_unchanged": "`data/inventory.json`, `data/inventory.schema.json`, `src/http_server.py`, `src/inventory_cli.py`, `src/inventory_watcher.py`, `src/linux_visible.py`, `src/lambda_inventory.py`, `src/web/index.html`, `src/web/app.js`, `src/web/style.css`, `deploy/ec2/README.md`, `deploy/ec2/environment.example`, `deploy/ec2/run_inventory_server.sh`, `tests/test_http_server.py`, `tests/test_inventory_cli.py`, `tests/test_inventory_watcher.py`, `tests/test_linux_visible.py`, and `tests/test_lambda_inventory.py`."
+      },
+      "continuity_checks": [
+        "README file-map paths must exist in the stage snapshot.",
+        "Inherited contracts remain stable unless this stage prompt explicitly changes them."
+      ],
+      "inherited_contract": "the inventory JSON file, schema, CLI, Linux-visible tools, direct HTTP `/inventory` response, browser inventory page, EC2 deployment wrapper, and Lambda inventory handler remain valid and unchanged.",
+      "stage": "07-api-gateway",
+      "summary": "Add API Gateway in front of the existing Lambda inventory path while preserving the Pi/EC2 HTTP server, browser inventory page, CLI, and JSON contract. Update the teaching docs to show the new front-door boundary and add a Node built-in browser-contract safety check that inspects the plain JavaScript app without network access."
+    },
+    {
+      "boundary_change": "the lesson adds a visible relational persistence boundary with SQL schema, seed, and database initialization while leaving the running application paths on the existing inventory JSON contract.",
+      "components": {
+        "added": "`data/schema.sql`, `data/seed.sql`, `data/init_db.py`, `src/db_adapter.py`, `src/sql_export.py`, and `tests/test_relational_persistence.py` as the first relational persistence teaching components.",
+        "replaced_or_evolved": "`docs/architecture.md` and `docs/data-contracts.md` now document how the JSON inventory fields map into a relational inventory table and how the initializer loads the same sample data.",
+        "reused_unchanged": "`data/inventory.json`, `data/inventory.schema.json`, `src/http_server.py`, `src/inventory_cli.py`, `src/inventory_watcher.py`, `src/linux_visible.py`, `src/lambda_inventory.py`, `src/web/index.html`, `src/web/app.js`, `src/web/style.css`, `deploy/ec2/README.md`, `deploy/ec2/environment.example`, `deploy/ec2/run_inventory_server.sh`, `deploy/api-gateway/README.md`, `tests/test_http_server.py`, `tests/test_inventory_cli.py`, `tests/test_inventory_watcher.py`, `tests/test_linux_visible.py`, `tests/test_lambda_inventory.py`, and `tests/test_web_app.js`."
+      },
+      "continuity_checks": [
+        "README file-map paths must exist in the stage snapshot.",
+        "Inherited contracts remain stable unless this stage prompt explicitly changes them."
+      ],
+      "inherited_contract": "the inventory JSON file, schema, CLI, Linux-visible helpers, direct HTTP `/inventory` response, browser inventory page, EC2 deployment wrapper, Lambda inventory handler, and API Gateway front door remain valid and unchanged.",
+      "stage": "08-relational-persistence",
+      "summary": "Introduce the first relational persistence lesson while preserving the Stage 7 inventory JSON contract and all earlier Linux/HTTP/browser/Lambda/API Gateway teaching artifacts unchanged. Add an inventory-only SQL schema, seed export path, a narrow SQLite/PostgreSQL adapter, a module-form initializer, and behavior-focused tests that prove the schema, seed, and local SQLite bootstrap work without requiring nonstandard packages."
+    },
+    {
+      "boundary_change": "the lesson adds managed RDS as the PostgreSQL hosting option and makes the operational difference between self-managed Linux database handling and AWS-managed database operations visible.",
+      "components": {
+        "added": "`infra/rds.yaml` and `deploy/rds/README.md` as the new RDS deployment wrapper for the relational lesson.",
+        "replaced_or_evolved": "`README.md`, `docs/architecture.md`, and `docs/data-contracts.md` now document the managed RDS boundary, including how the same SQL schema is hosted differently without changing the inventory contract.",
+        "reused_unchanged": "`data/init_db.py`, `data/schema.sql`, `data/seed.sql`, `src/db_adapter.py`, `src/http_server.py`, `src/inventory_cli.py`, `src/inventory_watcher.py`, `src/linux_visible.py`, `src/lambda_inventory.py`, `src/sql_export.py`, `src/web/index.html`, `src/web/app.js`, `src/web/style.css`, `tests/test_http_server.py`, `tests/test_inventory_cli.py`, `tests/test_inventory_watcher.py`, `tests/test_linux_visible.py`, `tests/test_lambda_inventory.py`, `tests/test_relational_persistence.py`, and `tests/test_web_app.js`."
+      },
+      "continuity_checks": [
+        "README file-map paths must exist in the stage snapshot.",
+        "Inherited contracts remain stable unless this stage prompt explicitly changes them."
+      ],
+      "inherited_contract": "the inventory JSON file, schema, CLI, Linux-visible tools, HTTP `/inventory` response, browser inventory page, EC2 deployment wrapper, Lambda inventory handler, and relational schema/initializer remain valid.",
+      "stage": "09-rds",
+      "summary": "Move the relational database lesson from self-managed PostgreSQL to managed Amazon RDS while preserving the Stage 8 SQLite/PostgreSQL adapter, initializer, and inventory contract. Add concrete RDS infrastructure and deployment instructions that resolve real outputs before verification, and update architecture/data-contract docs to compare the self-managed Linux database path with the managed RDS path."
+    },
+    {
+      "boundary_change": "Lambda\u2019s deployed inventory path now opens a PostgreSQL connection and reads inventory rows from the database instead of returning only static JSON.",
+      "components": {
+        "added": "`src/lambda_inventory.py` now contains the database-backed Lambda inventory path for Stage 10.",
+        "replaced_or_evolved": "`src/lambda_inventory.py` and `tests/test_lambda_inventory.py` now demonstrate the Lambda-to-RDS data-source shift while preserving the established inventory JSON contract.",
+        "reused_unchanged": "`data/inventory.json`, `data/inventory.schema.json`, `data/schema.sql`, `data/seed.sql`, `data/init_db.py`, `src/db_adapter.py`, `src/http_server.py`, `src/inventory_cli.py`, `src/inventory_watcher.py`, `src/linux_visible.py`, `src/sql_export.py`, `src/web/index.html`, `src/web/app.js`, `src/web/style.css`, `deploy/ec2/README.md`, `deploy/ec2/environment.example`, `deploy/ec2/run_inventory_server.sh`, `deploy/api-gateway/README.md`, `deploy/lambda/README.md`, `deploy/rds/README.md`, `infra/api-gateway.yaml`, `infra/lambda.yaml`, `infra/rds.yaml`, `tests/test_http_server.py`, `tests/test_inventory_cli.py`, `tests/test_inventory_watcher.py`, `tests/test_linux_visible.py`, `tests/test_relational_persistence.py`, and `tests/test_web_app.js`."
+      },
+      "continuity_checks": [
+        "README file-map paths must exist in the stage snapshot.",
+        "Inherited contracts remain stable unless this stage prompt explicitly changes them."
+      ],
+      "inherited_contract": "the inventory JSON fields, JSON Schema, CLI, Linux-visible helper scripts, HTTP `/inventory` response, browser inventory page, EC2 deployment wrapper, API Gateway front door, relational schema, and RDS deployment wrapper all remain valid.",
+      "stage": "10-lambda-rds",
+      "summary": "Add the Stage 10 Lambda/RDS inventory path while preserving the existing inventory JSON contract and earlier teaching artifacts. Replace the Lambda handler with a database-backed inventory reader that uses visible PostgreSQL connection settings by default, keeps the SQLite classroom path via the inherited adapter, and maps `bin_location` back into the established JSON field set. Update the lesson docs and architecture to show Lambda\u2019s data source change from static JSON to RDS, while reusing the prior CLI, Linux-visible, HTTP, browser, EC2, API Gateway, relational schema, and RDS wrapper components unchanged except where Lambda/RDS wiring must evolve."
+    },
+    {
+      "boundary_change": "the local HTTP server and Lambda handler now accept `POST /orders`, validate the request, write order rows, decrement inventory, and return visible order JSON.",
+      "components": {
+        "added": "`data/orders.schema.json`, `tests/test_http_order_flow.py`, `tests/test_sqlite_orders.py`, and the integrated order workflow in `src/http_server.py`, `src/lambda_inventory.py`, `src/web/index.html`, and `src/web/app.js`.",
+        "replaced_or_evolved": "`data/schema.sql`, `src/http_server.py`, `src/lambda_inventory.py`, `src/web/index.html`, and `src/web/app.js` now support transactional order placement while preserving the earlier inventory contract.",
+        "reused_unchanged": "`data/inventory.json`, `data/inventory.schema.json`, `data/init_db.py`, `data/seed.sql`, `src/order_form.html`, `src/web/style.css`, `deploy/ec2/README.md`, `deploy/ec2/environment.example`, `deploy/ec2/run_inventory_server.sh`, `deploy/api-gateway/README.md`, `deploy/lambda/README.md`, `deploy/rds/README.md`, `tests/test_http_server.py`, `tests/test_inventory_cli.py`, `tests/test_inventory_watcher.py`, `tests/test_linux_visible.py`, `tests/test_lambda_inventory.py`, `tests/test_relational_persistence.py`, and `tests/test_web_app.js`."
+      },
+      "continuity_checks": [
+        "README file-map paths must exist in the stage snapshot.",
+        "Inherited contracts remain stable unless this stage prompt explicitly changes them."
+      ],
+      "inherited_contract": "the inventory JSON fields, inventory schema, CLI, Linux-visible tools, `GET /inventory`, browser inventory page, EC2 deployment wrapper, Lambda inventory path, API Gateway front door, and the SQLite/PostgreSQL relational path remain valid.",
+      "stage": "11-orders",
+      "summary": "Evolve TinyWMS from read-only inventory to transactional orders while preserving the earlier inventory contract and SQLite classroom path. This delta adds the order JSON contract, updates the relational schema, evolves the local HTTP server and browser into an integrated inventory-and-order flow, and replaces the Lambda inventory handler with a transactional order-aware implementation. It also corrects the inherited HTTP server tests so their fixture data matches the frozen baseline inventory sample."
+    }
+  ]
+}

@@ -1,39 +1,70 @@
 # TinyWMS lesson: 10-lambda-rds
 
 ## Stage purpose
-This stage changes only one boundary: Lambda now reads inventory from RDS instead of from embedded JSON. The browser and HTTP response contract stay the same, so students can see that the data source changed while the JSON shape did not.
+This stage keeps the TinyWMS inventory contract stable while changing the Lambda implementation to read inventory from PostgreSQL/RDS instead of static JSON in the deployed path. Students can compare the unchanged JSON shape with the new database-backed compute path and still use the SQLite classroom path locally.
 
 ## Files in this lesson
-- `src/lambda_inventory.py` - Lambda handler that reads inventory rows from RDS and converts them back into the established inventory JSON contract
-- `src/rds_inventory.py` - small database helper for connecting to PostgreSQL and mapping rows into JSON-ready inventory items
-- `deploy/lambda-rds/template.json` - teaching deployment template showing the Lambda-to-RDS wiring and required environment variables
-- `deploy/lambda-rds/invoke.sh` - local invocation example that simulates Lambda input while using the same handler
-- `deploy/rds/bootstrap.sql` - unchanged schema/bootstrap SQL from the previous stage, still the source of truth for the relational tables
-- `docs/architecture.md` - updated boundary comparison for static JSON vs Lambda-to-RDS
-- `docs/data-contracts.md` - notes that the inventory JSON contract still does not change even though the data source does
-- `tests/test_lambda_inventory.py` - checks the Lambda response contract and the RDS mapping helper behavior
-- `tests/test_rds_inventory.py` - exercises the row-to-JSON conversion without needing AWS
+- `data/.gitkeep` - keeps the `data/` directory present in a clean checkout.
+- `data/init_db.py` - inherited module-form initializer for the relational schema and seed data.
+- `data/inventory.json` - canonical inventory sample and contract input for the earlier stages.
+- `data/inventory.schema.json` - JSON Schema for the inventory contract.
+- `data/schema.sql` - relational inventory schema with `bin_location` as the SQL column name.
+- `data/seed.sql` - seed rows derived from the inventory JSON sample.
+- `deploy/api-gateway/README.md` - inherited API Gateway deployment notes used to resolve the Lambda front door.
+- `deploy/ec2/README.md` - inherited EC2 runbook for the unchanged HTTP server path.
+- `deploy/ec2/environment.example` - inherited environment example for the EC2 server.
+- `deploy/ec2/run_inventory_server.sh` - inherited EC2 launcher for the HTTP server.
+- `deploy/lambda/README.md` - inherited Lambda deployment notes for the compute boundary.
+- `deploy/rds/README.md` - inherited RDS deployment notes for the database boundary.
+- `docs/architecture.md` - updated component map showing Lambda’s data-source evolution from static JSON to RDS.
+- `docs/data-contracts.md` - inherited contract guide describing the JSON-to-relational mapping.
+- `infra/api-gateway.yaml` - inherited API Gateway template for the Lambda inventory path.
+- `infra/lambda.yaml` - inherited Lambda template for the inventory lesson.
+- `infra/rds.yaml` - inherited RDS template for the relational lesson.
+- `src/.gitkeep` - keeps the `src/` directory present in a clean checkout.
+- `src/db_adapter.py` - inherited narrow SQLite/PostgreSQL teaching adapter.
+- `src/http_server.py` - inherited visible HTTP server for the direct Linux path.
+- `src/inventory_cli.py` - inherited inventory CLI for list/find/dump exercises.
+- `src/inventory_watcher.py` - inherited long-running file watcher.
+- `src/lambda_inventory.py` - evolved Lambda inventory handler that reads from database rows.
+- `src/linux_visible.py` - inherited Linux visibility helper.
+- `src/sql_export.py` - inherited JSON-to-SQL export helper.
+- `src/web/app.js` - inherited browser client that fetches `GET /inventory`.
+- `src/web/index.html` - inherited browser page.
+- `src/web/style.css` - inherited browser styling.
+- `tests/.gitkeep` - keeps the `tests/` directory present in a clean checkout.
+- `tests/test_http_server.py` - inherited HTTP contract tests.
+- `tests/test_inventory_cli.py` - inherited CLI contract tests.
+- `tests/test_inventory_watcher.py` - inherited watcher tests.
+- `tests/test_linux_visible.py` - inherited Linux visibility tests.
+- `tests/test_lambda_inventory.py` - evolved Lambda inventory tests that inject a fake database connection.
+- `tests/test_relational_persistence.py` - inherited relational persistence tests.
+- `tests/test_web_app.js` - inherited Node safety check for the browser contract.
 
 ## Run the lesson
 From this folder:
 ```bash
-python3 -m unittest discover -s tests
-TINYWMS_DB_HOST=127.0.0.1 TINYWMS_DB_PORT=5432 TINYWMS_DB_NAME=tinywms TINYWMS_DB_USER=tinywms TINYWMS_DB_PASSWORD=secret python3 src/lambda_inventory.py < src/lambda_event_example.json
+PYTHONPATH=src python3 -m unittest discover -s tests -v
+python3 -m data.init_db
 ```
-The second command shows the Lambda shape locally. It will only succeed if a PostgreSQL-compatible database is reachable with the expected tables and sample rows.
 
 ## Run tests
 ```bash
-python3 -m unittest discover -s tests
+PYTHONPATH=src python3 -m unittest discover -s tests -v
+node --test tests/test_web_app.js
 ```
 
 ## Student exercises
-1. Change `src/rds_inventory.py` so the inventory list is ordered by bin instead of by SKU, then re-run the tests and explain why the JSON contract did not change.
-2. Edit `deploy/lambda-rds/template.json` to use a different database port environment variable name, then update the handler and tests to match.
-
+1. Change one quantity in `data/inventory.json`, rerun `python3 -m data.init_db` for the SQLite path, and use `python3 -m unittest tests.test_lambda_inventory -v` or `curl` against the local HTTP path to compare the old sample with the database-backed result.
+2. Edit `tests/test_lambda_inventory.py` so the fake database row returns a different `bin_location`, then observe the changed behavior through the lesson's visible interface, then optionally run the tests and observe the returned JSON field still named `bin_location`.
 ## Continuity note
-- Inherited contract: `GET /inventory` still returns the same JSON document with the same `inventory[]` fields used by the browser and previous Lambda stage
-- Boundary changed in this stage: Lambda no longer reads embedded JSON; it connects to RDS, reads rows, and maps them back into the existing JSON shape
+- Inherited contract: the inventory JSON fields, JSON Schema, CLI, Linux-visible helper scripts, HTTP `/inventory` response, browser inventory page, EC2 deployment wrapper, API Gateway front door, relational schema, and RDS deployment wrapper all remain valid.
+- Boundary changed in this stage: Lambda’s deployed inventory path now opens a PostgreSQL connection and reads inventory rows from the database instead of returning only static JSON.
+
+## Component assembly update
+- Added: `src/lambda_inventory.py` now contains the database-backed Lambda inventory path for Stage 10.
+- Reused unchanged: `data/inventory.json`, `data/inventory.schema.json`, `data/schema.sql`, `data/seed.sql`, `data/init_db.py`, `src/db_adapter.py`, `src/http_server.py`, `src/inventory_cli.py`, `src/inventory_watcher.py`, `src/linux_visible.py`, `src/sql_export.py`, `src/web/index.html`, `src/web/app.js`, `src/web/style.css`, `deploy/ec2/README.md`, `deploy/ec2/environment.example`, `deploy/ec2/run_inventory_server.sh`, `deploy/api-gateway/README.md`, `deploy/lambda/README.md`, `deploy/rds/README.md`, `infra/api-gateway.yaml`, `infra/lambda.yaml`, `infra/rds.yaml`, `tests/test_http_server.py`, `tests/test_inventory_cli.py`, `tests/test_inventory_watcher.py`, `tests/test_linux_visible.py`, `tests/test_relational_persistence.py`, and `tests/test_web_app.js`.
+- Replaced/evolved: `src/lambda_inventory.py` and `tests/test_lambda_inventory.py` now demonstrate the Lambda-to-RDS data-source shift while preserving the established inventory JSON contract.
 
 ## Cleanup
-No AWS resources are created by the tests. If you deploy the Lambda/RDS wiring, delete the Lambda function, API resources if any, the RDS instance, subnet group, security groups, and any logs or stacks you created to avoid charges.
+No external resources are created in this stage. If you created a local SQLite database while exercising the lesson, remove `data/tinywms.db` when you are done.

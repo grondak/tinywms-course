@@ -1,260 +1,107 @@
-# TinyWMS data contracts
+# TinyWMS Data Contracts
 
-## Inventory JSON document
-TinyWMS uses one top-level JSON object containing an `inventory` array.
+This document describes TinyWMS JSON, HTTP, SQL, event, queue, file, and worker contracts as the course progresses.
 
-### Fields
-- `inventory` - array of product records
-- `inventory[].sku` - stable product identifier used by CLI, HTTP, browser, Lambda, API Gateway, and relational mapping examples
-- `inventory[].description` - human-readable product description
-- `inventory[].bin` - warehouse bin or shelf location
-- `inventory[].quantity` - on-hand count as a non-negative integer
-- `inventory[].unit` - unit of measure such as `each`, `box`, or `case`
+## Current state
+Stage 1 introduces the first contract: a small inventory JSON file with clearly documented fields. Stage 4 reuses that same contract in the browser without changing the data model. Stage 5 keeps that contract unchanged while adding EC2 deployment instructions around the same HTTP server. Stage 6 adds a Lambda compute path that still returns the same inventory JSON shape. Stage 7 adds API Gateway as a front door in front of the Lambda path without changing the inventory JSON contract. Stage 8 adds a relational representation of the same inventory concepts so students can see how visible JSON fields map into SQL tables and seed statements. Stage 9 keeps the relational contract the same and changes only the database hosting boundary to Amazon RDS. Stage 10 changes the deployed Lambda read path to the database while keeping the inventory response shape identical. Stage 11 adds a separate, explicit order JSON contract and uses it in the HTTP server, browser page, and Lambda order handler. Stage 12 keeps the same order JSON contract but hardens the transaction boundary. Stage 13 adds a new pick-work command contract that is emitted after commit and received from SQS. Stage 14 adds an OrderPlaced domain event contract that is emitted after the same commit and delivered to separate consumers. Stage 15 turns the consumer into a durable pick-ticket worker that writes human-readable file output and persists processed command IDs. Stage 20 keeps those contracts intact while improving the local browser and HTTP path that demonstrates them.
 
-## Order request JSON document
-TinyWMS orders use one top-level JSON object with a customer name and one or more requested lines.
+## Inventory JSON contract
+Each inventory item is a JSON object with these fields:
+- `sku` - stable item identifier used for lookups and display
+- `description` - human-readable product description
+- `bin_location` - warehouse bin or shelf location
+- `quantity` - on-hand quantity as a non-negative integer
+- `unit` - unit of measure such as `each`, `case`, or `box`
 
-### Fields
-- `customer` - human-readable customer or class/store name submitting the order
-- `lines` - array of requested order lines
-- `lines[].sku` - product SKU being requested
-- `lines[].quantity` - requested quantity as a positive integer
+The inventory file is a JSON array of these objects.
 
-### Example
-```json
-{
-  "customer": "Example School Store",
-  "lines": [
-    { "sku": "SKU-1001", "quantity": 2 },
-    { "sku": "SKU-1003", "quantity": 1 }
-  ]
-}
-```
+## Order JSON contract
+Stage 11 introduces a minimal order request object:
+- `order_id` - non-empty string chosen by the browser or client
+- `lines` - non-empty array of order line objects
 
-## Order success response JSON document
-A successful `POST /orders` returns a small JSON object describing what was committed.
+Each order line object contains:
+- `sku` - non-empty string identifying the inventory item to reserve
+- `quantity` - positive integer quantity to remove from inventory
+- `description` - optional human-readable description echoed in the browser and visible code paths
 
-### Fields
-- `orderId` - database-generated order identifier
-- `customer` - copied from the request
-- `lines` - committed order lines
-- `lines[].sku` - SKU that was written to `order_lines`
-- `lines[].quantity` - quantity that was committed
-- `status` - simple teaching field set to `created`
+The HTTP server and Lambda handler both validate the request before applying inventory changes. Successful requests return a small JSON object with the accepted `order_id` and `status` fields; rejections return JSON error objects with a visible message.
 
-## Order failure response JSON document
-The order path returns visible JSON errors rather than silent failures.
+## JSON to relational mapping
+Stage 8 introduced a minimal relational model derived from the same inventory records:
+- `sku` maps to the table primary key.
+- `description` maps to a required text column.
+- `bin_location` maps to the SQL `bin_location` column in the lesson schema.
+- `quantity` maps to a non-negative integer column.
+- `unit` maps to a required text column.
 
-### Common fields
-- `error` - short machine-readable error summary
-- `details` - optional list or string explaining what was wrong
+The lesson keeps the mapping intentionally small so students can compare the same business data in two representations:
+- JSON file rows in `data/inventory.json`
+- SQL schema in `data/schema.sql`
+- SQL seed rows in `data/seed.sql`
+- SQL export output from `src/sql_export.py`
 
-### Insufficient inventory failure
-When requested quantity exceeds available stock, or when another concurrent transaction consumes the remaining stock first, the handler returns:
-- `error` - `insufficient inventory`
-- `sku` - SKU that could not be satisfied
-- `requested` - requested quantity
-- `available` - available quantity visible to the failing transaction at the time it detects the problem
+## RDS operational shift
+Stage 9 does not change the data model. It changes where the database runs and who operates it:
+- self-managed Linux database process: student installs, starts, patches, backs up, and monitors the database
+- Amazon RDS: AWS operates the database instance, endpoint, storage, and much of the routine availability work; students still manage schema, credentials, connectivity, and application behavior
 
-## Pick-work SQS message JSON document
-After a successful committed order, TinyWMS sends a separate JSON command message to Amazon SQS. This is not the HTTP response body and not a database row. It is the asynchronous handoff telling downstream work what to pick.
+The same SQL schema and seed statements are the teaching artifacts in both cases.
 
-### Fields
-- `messageType` - command type string, currently `PickWorkRequested`
-- `version` - integer schema version for the message contract, currently `1`
-- `orderId` - committed database order identifier
-- `customer` - copied from the committed order
-- `createdAt` - UTC timestamp string showing when the pick-work message was built
-- `lines` - array of work lines to pick
-- `lines[].lineNumber` - visible line ordering starting at `1`
-- `lines[].sku` - SKU to pick
-- `lines[].quantity` - quantity to pick
+## SQLite and PostgreSQL note
+Stage 20 adds a local SQLite execution path for the order workflow and database schema tests. SQLite is useful for a portable teaching demo, but it cannot prove row locking behavior. Stage 12 concurrency remains a PostgreSQL lesson because only PostgreSQL can exercise the real `FOR UPDATE` overlap boundary used by the hardening tests.
 
-### Example
-```json
-{
-  "messageType": "PickWorkRequested",
-  "version": 1,
-  "orderId": 42,
-  "customer": "Example School Store",
-  "createdAt": "2026-01-15T10:30:00Z",
-  "lines": [
-    { "lineNumber": 1, "sku": "SKU-1001", "quantity": 2 },
-    { "lineNumber": 2, "sku": "SKU-1003", "quantity": 1 }
-  ]
-}
-```
+## Pick-work command contract
+Stage 13 adds a queue message that the order Lambda emits after commit. The message is JSON and must remain easy to inspect.
 
-### Boundary note
-- `POST /orders` still returns the established order success JSON contract to the caller.
-- The SQS message is a second contract created after that order succeeds.
-- The message intentionally contains enough order information for a downstream worker to act without re-reading the original HTTP request body.
+Required fields:
+- `command_id` - stable identifier for the queue command, derived from order ID, SKU, quantity, and bin location
+- `order_id` - original order identifier
+- `sku` - SKU taken from the locked inventory row
+- `description` - product description taken from the locked inventory row
+- `quantity` - quantity to pick
+- `bin` - bin location taken from the locked inventory row
 
-## Pick-ticket text file document
-The pick-ticket worker converts one `PickWorkRequested` JSON message into one human-readable text ticket appended to `pick-tickets.txt` on a Linux host.
+The command is emitted once for every order line. The queue consumer receives the decoded JSON body, not the raw SQS envelope, and acknowledges only after successful processing.
 
-### Fields represented in the text ticket
-- `orderId` - shown in the ticket header so a human picker can match work to an order
-- `customer` - shown in the ticket header for context
-- `createdAt` - copied from the command so students can see when the asynchronous work request was created
-- `lines[].sku` - shown per line item
-- `lines[].quantity` - shown per line item
-- product `description` - looked up for the SKU so the ticket is readable to a human worker
-- inventory `bin` - looked up for the SKU so the picker knows where to go
+## OrderPlaced domain event contract
+Stage 14 adds a fact event that says what happened after the order commit completed.
 
-### Example
-```text
-=== TinyWMS Pick Ticket ===
-Order ID: 42
-Customer: Example School Store
-Requested At: 2026-01-15T10:30:00Z
+Required fields:
+- `version` - small integer schema version for the event detail
+- `order_id` - original order identifier
+- `lines` - array of order line objects containing the reserved `sku` and `quantity`
 
-1. SKU-1001 | Blue widget | qty 2 | bin A1-01
-2. SKU-1003 | Packing tape | qty 1 | bin B2-04
+The event envelope is produced with these visible fields:
+- `Source` - the TinyWMS order source string
+- `DetailType` - `OrderPlaced`
+- `Detail` - JSON detail payload encoded as a string for EventBridge delivery
 
-```
+This contract is separate from the SQS command contract:
+- the SQS message is imperative and tells a worker to do a task
+- the event message is descriptive and tells consumers that the order was placed
 
-### Boundary note
-- The queue message remains the machine-readable contract between the order path and the worker.
-- `pick-tickets.txt` is a downstream Linux file artifact created by the worker from that message.
-- The file is intentionally human-readable rather than JSON so students can compare machine and human representations of the same work.
-- In the container lesson, this text format stays the same whether the worker runs directly on the host or inside a Docker container.
-- In the AWS deployment lesson, this text format still stays the same even when the queue and order path are created from CloudFormation.
+## Pick-ticket output contract
+Stage 15 adds a durable file output contract created by the worker after successful command processing.
 
-## OrderPlaced domain event JSON document
-After a successful committed order, TinyWMS also emits a separate domain event to Amazon EventBridge. This contract is intentionally different from the SQS command. It describes something that already happened instead of instructing a specific downstream worker what to do.
+Required fields per line:
+- `command_id` - copied from the decoded pick-work command
+- `order_id` - original order identifier
+- `sku` - SKU being picked
+- `description` - human-readable item description from the command
+- `quantity` - quantity being picked
+- `bin` - bin location from the command
 
-### Fields
-- `eventType` - event type string, currently `OrderPlaced`
-- `version` - integer schema version for the event contract, currently `1`
-- `orderId` - committed database order identifier
-- `customer` - copied from the committed order
-- `placedAt` - UTC timestamp string showing when the event document was built
-- `lines` - array of committed order lines
-- `lines[].lineNumber` - visible line ordering starting at `1`
-- `lines[].sku` - SKU included in the committed order
-- `lines[].quantity` - quantity included in the committed order
+The worker appends one human-readable line per processed command to `pick-tickets.txt`. The worker also persists a separate idempotency record of processed `command_id` values so redelivered queue messages do not create duplicate tickets after a restart.
 
-### Example
-```json
-{
-  "eventType": "OrderPlaced",
-  "version": 1,
-  "orderId": 42,
-  "customer": "Example School Store",
-  "placedAt": "2026-01-15T10:30:00Z",
-  "lines": [
-    { "lineNumber": 1, "sku": "SKU-1001", "quantity": 2 },
-    { "lineNumber": 2, "sku": "SKU-1003", "quantity": 1 }
-  ]
-}
-```
-
-### Command-versus-event note
-- `PickWorkRequested` means: a downstream component is being told to do a specific task.
-- `OrderPlaced` means: a business fact has occurred and any interested consumer may react.
-- The command and the event can contain similar order information while serving different architectural roles.
-- Keeping both contracts visible helps students compare imperative messaging and descriptive event publication.
-
-## Callback demo boundary summary
-This stage adds a teaching runbook for the complete callback path. The important idea is that one browser action produces several different visible representations.
-
-### Browser to HTTP/API Gateway
-- The browser sends the order request JSON document to `POST /orders`.
-- The HTTP body is the same JSON shape described in **Order request JSON document**.
-
-### API Gateway to Lambda
-- API Gateway wraps the HTTP request in a Lambda proxy event JSON object.
-- TinyWMS examples keep fields like `httpMethod`, `path`, `headers`, and `body` visible so students can inspect them directly.
-- In this wrapped event, the original order JSON appears inside the `body` string.
-
-### Lambda to RDS
-- Lambda converts the request JSON into SQL operations against `orders`, `order_lines`, and `inventory_locations`.
-- This boundary is not JSON on the wire; it is explicit SQL and relational rows.
-- The demo should make clear that the committed database state changes before downstream asynchronous work is processed.
-
-### Lambda to SQS
-- After commit, Lambda builds the `PickWorkRequested` JSON command and sends it to SQS.
-- This is the machine-readable command that the Python worker later consumes.
-
-### Lambda to EventBridge
-- After commit, Lambda also builds the `OrderPlaced` JSON event and sends it to EventBridge.
-- This is a fact about the completed order, not an instruction to a specific worker.
-
-### Python worker to Linux file
-- The worker reads the `PickWorkRequested` JSON command.
-- The worker writes a human-readable pick ticket to `pick-tickets.txt`.
-- The callback demo intentionally ends on a plain Linux file so students can watch the result with `tail -f`.
-
-### Docker container boundary for the worker
-- In the container lesson, the worker may run inside a Docker container instead of directly on the host.
-- The input contract is still the same `PickWorkRequested` JSON document.
-- The output contract is still the same human-readable pick-ticket text.
-- The visible new boundary there is container configuration: image, container command, environment variables, and mounted output directory.
-
-### Infrastructure-as-code boundary for the cloud path
-- In the AWS deployment stage, the cloud-side path is also represented as CloudFormation JSON plus deployment parameters.
-- This infrastructure description is not a new application data contract; it is an operator contract describing how AWS resources are created and connected.
-- Students should observe that infrastructure packaging changes resource creation and operations, not the meaning of inventory JSON, order JSON, SQS pick-work JSON, EventBridge event JSON, or pick-ticket text.
-
-### Git-history teaching boundary
-- In this stage, the repository history itself becomes another visible teaching boundary.
-- A milestone tag does not change the meaning of a stable contract by itself.
-- Instead, it lets students inspect which contracts existed at a given point in the semester and which boundaries had not yet been introduced.
-- For example, an early JSON CLI milestone should show the inventory contract without later AWS deployment artifacts, while a later queue/event milestone should show the same core order meaning plus new asynchronous contracts.
-- The milestone map should therefore preserve contract continuity while making architectural growth visible over time.
-
-## Final walkthrough note
-- `docs/end-to-end.md` now ties these contracts together in one trace of a single order.
-- Use that walkthrough when you want to see where each JSON document is created, transformed, transmitted, stored, retried, or turned into human-readable output.
-- The walkthrough does not introduce a new contract. It explains how the existing contracts relate across the final architecture.
-
-## Relational mapping
-The relational lessons keep the same inventory meaning but store it in tables.
-
-### Table: `products`
-- `sku` - primary key, copied from `inventory[].sku`
-- `description` - copied from `inventory[].description`
-- `unit` - copied from `inventory[].unit`
-
-### Table: `inventory_locations`
-- `sku` - foreign key to `products.sku`
-- `bin` - copied from `inventory[].bin`
-- `quantity` - copied from `inventory[].quantity`
-
-### Table: `orders`
-- `id` - generated order identifier returned as `orderId`
-- `customer` - copied from order request `customer`
-- `created_at` - database timestamp showing when the order row was inserted
-
-### Table: `order_lines`
-- `order_id` - foreign key to `orders.id`
-- `line_number` - explicit visible line ordering
-- `sku` - copied from request `lines[].sku`
-- `quantity` - copied from request `lines[].quantity`
-
-### RDS note
-When the database is moved to Amazon RDS, the table structure and mapping do not change. Only the operational home of the same schema changes.
-
-### Lambda-to-RDS note
-When Lambda reads inventory from RDS, it must convert database rows back into the exact inventory JSON document shape. When Lambda writes orders to RDS, it must preserve the order request meaning while exposing success and failure as JSON.
-
-## JSON-to-table mapping notes
-- One JSON inventory item becomes one `products` row and one `inventory_locations` row.
-- One order JSON document becomes one `orders` row and one or more `order_lines` rows.
-- The order transaction must either write all related rows and decrements or write none of them.
-- In the concurrency lesson, the visible SQL strategy is: insert the order row, then decrement inventory with a conditional `UPDATE` that succeeds only when enough quantity remains.
-- In the SQS lesson, one committed order success result becomes one pick-work JSON message sent to the queue.
-- In the pick-ticket worker lesson, that same pick-work message can become one appended human-readable ticket in `pick-tickets.txt`.
-- In the domain-events lesson, that same committed order success result also becomes one `OrderPlaced` domain event sent to EventBridge.
-- In the callback demo lesson, all of those boundary documents are intentionally shown side by side so students can compare them.
-- In the container lesson, the worker runtime changes but the JSON message and text output meanings stay the same.
-- In the AWS deployment lesson, the cloud resources are created reproducibly but the application boundary contracts still keep the same meanings.
-- In the Git history lesson, milestone tags help students compare when each of those contracts first appeared and how later implementations preserved or extended them.
-- In the final walkthrough lesson, one document now traces how those same contracts move across the current full system.
-- The JSON documents remain the teaching contracts for application boundaries.
-- SQL is used for persistence; Lambda reads SQL rows and emits JSON response bodies used by the earlier and current stages.
-
-## Notes
-- The model stays intentionally small so beginning students can understand it immediately.
-- Later stages must preserve this JSON meaning unless a lesson explicitly says otherwise.
+## Planned contract areas
+- inventory JSON
+- order JSON
+- command-line interfaces
+- HTTP requests and responses
+- browser data rendering
+- deployment and operator inputs
+- Lambda event input and output
+- relational mappings
+- queue and event message formats
+- worker output files

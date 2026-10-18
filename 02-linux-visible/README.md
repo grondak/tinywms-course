@@ -1,37 +1,47 @@
 # TinyWMS lesson: 02-linux-visible
 
 ## Stage purpose
-This stage turns the TinyWMS inventory data into small Linux-friendly programs that expose stdin, stdout, stderr, exit codes, files, environment variables, and a long-running process. Students can inspect these behaviors with ordinary shell tools before any HTTP server appears.
+This stage keeps the JSON inventory backbone and adds tiny Linux-oriented demo programs so students can see stdin, stdout, stderr, exit codes, environment variables, files, and a long-running process in action. The point is to make process behavior visible with ordinary shell tools before HTTP arrives in the next stage.
 
 ## Files in this lesson
-- `src/inventory_cli.py` - the JSON inventory reader from the previous stage
-- `src/linux_demo.py` - command-line examples that print to stdout/stderr, read stdin, and respect environment variables
-- `src/watch_inventory.py` - a simple long-running process that repeatedly reports inventory file changes
-- `tests/test_linux_demo.py` - tests for CLI exit codes and visible output
-- `data/inventory.json` - sample data used by the exercises
+- `data/inventory.json` - reused Stage 1 inventory data for all examples in this lesson.
+- `data/inventory.schema.json` - reused schema describing the inventory JSON contract.
+- `docs/architecture.md` - updated Component Assembly Map showing the new Linux-observability tools and the Stage 1 components they reuse.
+- `docs/data-contracts.md` - reused inventory contract notes.
+- `src/inventory_cli.py` - reused CLI for listing, finding, and dumping inventory JSON.
+- `src/linux_visible.py` - small command-line helper that makes stdin/stdout/stderr, exit codes, and environment variables visible.
+- `src/inventory_watcher.py` - long-running process that repeatedly snapshots inventory JSON into a log file so students can use `tail -f`.
+- `tests/test_inventory_cli.py` - reused inventory CLI tests from Stage 1.
+- `tests/test_linux_visible.py` - new tests for the Linux-visible helper commands.
+- `tests/test_inventory_watcher.py` - new tests for the watcher snapshot behavior.
 
 ## Run the lesson
 From this folder:
 ```bash
-python3 src/linux_demo.py stdout
-python3 src/linux_demo.py stderr
-python3 src/linux_demo.py stdin < data/inventory.json
-DEMO_MESSAGE='hello from env' python3 src/linux_demo.py env
-python3 src/watch_inventory.py data/inventory.json
+python3 src/linux_visible.py env
+TINYWMS_DEMO=hello python3 src/linux_visible.py env
+printf 'widget\n' | python3 src/linux_visible.py echo
+python3 src/linux_visible.py echo hello from argv
+python3 src/linux_visible.py fail
+python3 src/inventory_watcher.py data/inventory.json /tmp/tinywms-watch.log
 ```
 
 ## Run tests
 ```bash
-python3 -m unittest discover -s tests
+PYTHONPATH=src python3 -m unittest discover -s tests -v
 ```
 
 ## Student exercises
-1. Pipe the inventory file through `grep SKU-1002` and explain why the line appears or not.
-2. Start `watch_inventory.py`, edit `data/inventory.json`, and use `tail -f` in another terminal to watch the changes.
-
+1. Change `TINYWMS_DEMO` and run `python3 src/linux_visible.py env`, then observe the new value printed on stdout.
+2. Start `python3 src/inventory_watcher.py data/inventory.json /tmp/tinywms-watch.log` in one terminal, edit `data/inventory.json` in another, and use `tail -f /tmp/tinywms-watch.log` to watch the repeated snapshots.
 ## Continuity note
-- Inherited contract: the inventory JSON format and the CLI validation behavior remain unchanged
-- Boundary changed in this stage: Linux process behavior is now part of the lesson, but there is still no HTTP server
+- Inherited contract: the inventory JSON file, schema, and CLI from Stage 1 remain valid and continue to define the data shape.
+- Boundary changed in this stage: TinyWMS now exposes additional Linux process behavior through small demo tools, including stderr and exit codes, plus a long-running watcher process with a log file.
+
+## Component assembly update
+- Added: `src/linux_visible.py`, `src/inventory_watcher.py`, `tests/test_linux_visible.py`, `tests/test_inventory_watcher.py`.
+- Reused unchanged: `data/inventory.json`, `data/inventory.schema.json`, `src/inventory_cli.py`, and `tests/test_inventory_cli.py` are carried forward exactly from Stage 1.
+- Replaced/evolved: `README.md` and `docs/architecture.md` are expanded to teach Linux visibility and to document the new process/file boundaries.
 
 ## Cleanup
-Stop any background `watch_inventory.py` processes with `kill <pid>` when you are done.
+If you started the watcher, stop it with `Ctrl+C` and remove any temporary log file you created, for example `rm -f /tmp/tinywms-watch.log`.

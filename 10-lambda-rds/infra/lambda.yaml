@@ -1,0 +1,91 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: TinyWMS Lambda inventory lesson
+
+Parameters:
+  FunctionName:
+    Type: String
+    Default: tinywms-lambda-inventory
+  InventoryFilePath:
+    Type: String
+    Default: data/inventory.json
+  DatabaseEndpoint:
+    Type: String
+    Default: ''
+    Description: Reserved for later database-backed stages.
+  DatabasePort:
+    Type: Number
+    Default: 5432
+  DatabaseName:
+    Type: String
+    Default: tinywms
+  DatabaseUser:
+    Type: String
+    Default: tinywms
+  DatabasePassword:
+    Type: String
+    NoEcho: true
+    Default: change-me
+
+Resources:
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Path: /
+      RoleName: !Sub '${AWS::StackName}-lambda-role'
+
+  InventoryLambdaFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Ref FunctionName
+      Handler: index.handler
+      Runtime: python3.11
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Timeout: 10
+      MemorySize: 128
+      Environment:
+        Variables:
+          INCOMING_INVENTORY_FILE: !Ref InventoryFilePath
+          DATABASE_ENDPOINT: !Ref DatabaseEndpoint
+          DATABASE_PORT: !Ref DatabasePort
+          DATABASE_NAME: !Ref DatabaseName
+          DATABASE_USER: !Ref DatabaseUser
+          DATABASE_PASSWORD: !Ref DatabasePassword
+      Code:
+        ZipFile: |
+          import json
+          import os
+          from pathlib import Path
+
+          ROOT = Path('/tmp')
+          INVENTORY_FILE = Path(os.environ.get('INCOMING_INVENTORY_FILE', 'data/inventory.json'))
+
+          def handler(event, context):
+              return {
+                  'statusCode': 200,
+                  'headers': {'Content-Type': 'application/json'},
+                  'body': json.dumps(json.loads(INVENTORY_FILE.read_text(encoding='utf-8')))
+              }
+
+  LambdaLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/${FunctionName}'
+      RetentionInDays: 7
+
+Outputs:
+  FunctionName:
+    Value: !Ref InventoryLambdaFunction
+  FunctionArn:
+    Value: !GetAtt InventoryLambdaFunction.Arn
+  LogGroupName:
+    Value: !Ref LambdaLogGroup

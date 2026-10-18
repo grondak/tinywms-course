@@ -1,0 +1,35 @@
+{
+  "current_stage": "01-json-backbone",
+  "notes": [
+    {
+      "boundary_change": "",
+      "components": {
+        "added": "",
+        "replaced_or_evolved": "",
+        "reused_unchanged": ""
+      },
+      "continuity_checks": [
+        "README file-map paths must exist in the stage snapshot.",
+        "Inherited contracts remain stable unless this stage prompt explicitly changes them."
+      ],
+      "inherited_contract": "",
+      "stage": "00-establish-repository",
+      "summary": "Establish the TinyWMS repository scaffold and teaching docs with no runnable application yet."
+    },
+    {
+      "boundary_change": "TinyWMS now has a visible JSON file boundary and a Python CLI process boundary.",
+      "components": {
+        "added": "`data/inventory.json`, `data/inventory.schema.json`, `src/inventory_cli.py`, `tests/test_inventory_cli.py`.",
+        "replaced_or_evolved": "`README.md`, `docs/architecture.md`, and `docs/data-contracts.md` evolve from repository-establishment guidance into concrete inventory contract documentation.",
+        "reused_unchanged": "the directory scaffold from Stage 0 (`docs/`, `data/`, `src/`, `tests/`) remains in place."
+      },
+      "continuity_checks": [
+        "README file-map paths must exist in the stage snapshot.",
+        "Inherited contracts remain stable unless this stage prompt explicitly changes them."
+      ],
+      "inherited_contract": "the repository scaffold and teaching-document structure from Stage 0 remain valid.",
+      "stage": "01-json-backbone",
+      "summary": "Define TinyWMS's initial JSON inventory contract and a small Python CLI that can load, validate, list, find, and emit inventory JSON. Add inherited Python tests for the new runnable component so the stage has a visible safety net."
+    }
+  ]
+}

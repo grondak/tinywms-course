@@ -1,102 +1,148 @@
-import io
-import os
+from __future__ import annotations
+
+import json
 import tempfile
 import unittest
-from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
-from unittest import mock
+from unittest.mock import patch
 
-from src import pick_ticket_worker
+import src.pick_ticket_worker as worker
+
+
+class FakeConsumer:
+    def __init__(self, batches: list[list[dict[str, object]]]):
+        self.batches = list(batches)
+        self.calls = 0
+
+    def __call__(self, queue_url, callback, *, wait_time_seconds, max_number_of_messages):
+        if not self.batches:
+            raise KeyboardInterrupt
+        self.calls += 1
+        batch = self.batches.pop(0)
+        for message in batch:
+            callback(message, object())
+        return len(batch)
 
 
 class PickTicketWorkerTests(unittest.TestCase):
-    def sample_lookup(self):
+    def message(self, command_id: str, order_id: str = 'ORD-1001') -> dict[str, object]:
         return {
-            "SKU-1001": {"description": "Blue widget", "bin": "A1-01"},
-            "SKU-1003": {"description": "Packing tape", "bin": "B2-04"},
+            'command_id': command_id,
+            'order_id': order_id,
+            'sku': 'SKU-001',
+            'description': 'Galvanized Shelf Bracket',
+            'quantity': 1,
+            'bin': 'A1-01',
         }
 
-    def sample_message(self):
-        return {
-            "messageType": "PickWorkRequested",
-            "version": 1,
-            "orderId": 42,
-            "customer": "Example School Store",
-            "createdAt": "2026-01-15T10:30:00Z",
-            "lines": [
-                {"lineNumber": 1, "sku": "SKU-1001", "quantity": 2},
-                {"lineNumber": 2, "sku": "SKU-1003", "quantity": 1},
-            ],
-        }
+    def run_worker(self, ticket_file: Path, state_file: Path, fake: FakeConsumer, *, once: bool = True):
+        argv = [
+            'pick_ticket_worker.py',
+            'queue-url',
+            str(ticket_file),
+            '--state-file',
+            str(state_file),
+        ]
+        if once:
+            argv.append('--once')
+        with patch.object(worker, 'consume_messages', side_effect=fake):
+            exit_code = worker.main(argv)
+        return exit_code
 
-    def test_default_output_path_falls_back_to_pick_tickets_txt(self):
-        with mock.patch.dict(os.environ, {}, clear=True):
-            self.assertEqual(pick_ticket_worker.default_output_path(), "pick-tickets.txt")
-
-    def test_default_output_path_can_come_from_environment(self):
-        with mock.patch.dict(os.environ, {"TINYWMS_PICK_TICKETS_PATH": "/work/output/pick-tickets.txt"}, clear=True):
-            self.assertEqual(pick_ticket_worker.default_output_path(), "/work/output/pick-tickets.txt")
-
-    def test_process_pick_work_message_appends_ticket_to_file(self):
+    def test_multiple_messages_append_multiple_tickets(self):
         with tempfile.TemporaryDirectory() as tmp:
-            output_path = Path(tmp) / "pick-tickets.txt"
-            stdout_buffer = io.StringIO()
-            with redirect_stdout(stdout_buffer):
-                pick_ticket_worker.process_pick_work_message(self.sample_message(), self.sample_lookup(), output_path)
+            ticket_file = Path(tmp) / 'pick-tickets.txt'
+            state_file = Path(tmp) / 'state.json'
+            fake = FakeConsumer([[self.message('pick-work:1'), self.message('pick-work:2', 'ORD-1002')]])
+            exit_code = self.run_worker(ticket_file, state_file, fake)
 
-            text = output_path.read_text(encoding="utf-8")
-            self.assertIn("Order ID: 42", text)
-            self.assertIn("SKU-1001 | Blue widget | qty 2 | bin A1-01", text)
-            self.assertIn("wrote pick ticket orderId=42", stdout_buffer.getvalue())
+            self.assertEqual(exit_code, 0)
+            self.assertEqual(fake.calls, 1)
+            contents = ticket_file.read_text(encoding='utf-8')
+            self.assertIn('command_id=pick-work:1', contents)
+            self.assertIn('command_id=pick-work:2', contents)
 
-    def test_process_sqs_message_acknowledges_after_success(self):
-        sqs_message = {
-            "MessageId": "abc-123",
-            "ReceiptHandle": "handle-1",
-            "Body": '{"orderId": 42, "customer": "Example School Store", "createdAt": "2026-01-15T10:30:00Z", "lines": [{"lineNumber": 1, "sku": "SKU-1001", "quantity": 2}]}'
-        }
+    def test_duplicate_delivery_after_restart_is_suppressed_by_state_file(self):
         with tempfile.TemporaryDirectory() as tmp:
-            output_path = Path(tmp) / "pick-tickets.txt"
-            stdout_buffer = io.StringIO()
-            with mock.patch("src.pick_ticket_worker.delete_message") as delete_message, redirect_stdout(stdout_buffer):
-                ok = pick_ticket_worker.process_sqs_message(sqs_message, self.sample_lookup(), output_path, ack=True)
+            ticket_file = Path(tmp) / 'pick-tickets.txt'
+            state_file = Path(tmp) / 'state.json'
+            state_file.write_text(json.dumps({'processed_command_ids': ['pick-work:dup']}), encoding='utf-8')
+            fake = FakeConsumer([[self.message('pick-work:dup')]])
+            exit_code = self.run_worker(ticket_file, state_file, fake)
 
-        self.assertTrue(ok)
-        delete_message.assert_called_once_with("handle-1")
-        output = stdout_buffer.getvalue()
-        self.assertIn("received messageId=abc-123", output)
-        self.assertIn("acknowledged messageId=abc-123", output)
+            self.assertEqual(exit_code, 0)
+            self.assertFalse(ticket_file.exists())
+            self.assertIn('pick-work:dup', state_file.read_text(encoding='utf-8'))
 
-    def test_process_sqs_message_leaves_failed_message_unacked(self):
-        sqs_message = {
-            "MessageId": "bad-1",
-            "ReceiptHandle": "handle-1",
-            "Body": 'not-json'
-        }
+    def test_service_continues_after_empty_poll(self):
         with tempfile.TemporaryDirectory() as tmp:
-            output_path = Path(tmp) / "pick-tickets.txt"
-            stderr_buffer = io.StringIO()
-            with mock.patch("src.pick_ticket_worker.delete_message") as delete_message, redirect_stderr(stderr_buffer):
-                ok = pick_ticket_worker.process_sqs_message(sqs_message, self.sample_lookup(), output_path, ack=True)
+            ticket_file = Path(tmp) / 'pick-tickets.txt'
+            state_file = Path(tmp) / 'state.json'
+            stop_flag = {'stop': False}
+            polls = [[], [self.message('pick-work:1')]]
+            seen = []
 
-        self.assertFalse(ok)
-        delete_message.assert_not_called()
-        self.assertIn("failed messageId=bad-1", stderr_buffer.getvalue())
+            def fake_consume(queue_url, callback, *, wait_time_seconds, max_number_of_messages):
+                batch = polls.pop(0)
+                seen.append(len(batch))
+                for message in batch:
+                    callback(message, object())
+                if not polls:
+                    stop_flag['stop'] = True
+                return len(batch)
 
-    def test_run_once_from_file_processes_local_example(self):
+            argv = ['pick_ticket_worker.py', 'queue-url', str(ticket_file), '--state-file', str(state_file)]
+            with patch.object(worker, 'consume_messages', side_effect=fake_consume):
+                exit_code = worker.main(argv, stop_flag=stop_flag)
+
+            self.assertEqual(exit_code, 0)
+            self.assertEqual(seen, [0, 1])
+            self.assertIn('command_id=pick-work:1', ticket_file.read_text(encoding='utf-8'))
+
+    def test_once_mode_is_bounded_to_one_poll(self):
         with tempfile.TemporaryDirectory() as tmp:
-            message_path = Path(tmp) / "message.json"
-            output_path = Path(tmp) / "pick-tickets.txt"
-            message_path.write_text(
-                '{"orderId": 42, "customer": "Example School Store", "createdAt": "2026-01-15T10:30:00Z", "lines": [{"lineNumber": 1, "sku": "SKU-1001", "quantity": 2}]}',
-                encoding="utf-8",
-            )
+            ticket_file = Path(tmp) / 'pick-tickets.txt'
+            state_file = Path(tmp) / 'state.json'
+            fake = FakeConsumer([[self.message('pick-work:1')], [self.message('pick-work:2')]])
+            exit_code = self.run_worker(ticket_file, state_file, fake, once=True)
 
-            code = pick_ticket_worker.run_once_from_file(message_path, self.sample_lookup(), output_path)
+            self.assertEqual(exit_code, 0)
+            self.assertEqual(fake.calls, 1)
+            contents = ticket_file.read_text(encoding='utf-8')
+            self.assertIn('pick-work:1', contents)
+            self.assertNotIn('pick-work:2', contents)
 
-            self.assertEqual(code, 0)
-            self.assertIn("Order ID: 42", output_path.read_text(encoding="utf-8"))
+    def test_failure_does_not_append_or_acknowledge(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            ticket_file = Path(tmp) / 'pick-tickets.txt'
+            state_file = Path(tmp) / 'state.json'
+            fake = FakeConsumer([[{'command_id': 'pick-work:bad'}]])
+            with patch.object(worker, 'consume_messages', side_effect=fake):
+                with self.assertRaises(KeyError):
+                    worker.main([
+                        'pick_ticket_worker.py',
+                        'queue-url',
+                        str(ticket_file),
+                        '--state-file',
+                        str(state_file),
+                        '--once',
+                    ])
+            self.assertFalse(ticket_file.exists())
+            self.assertFalse(state_file.exists())
+
+    def test_acknowledgement_after_output_creates_ticket_before_state_update(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            ticket_file = Path(tmp) / 'pick-tickets.txt'
+            state_file = Path(tmp) / 'state.json'
+            fake = FakeConsumer([[self.message('pick-work:1')]])
+            exit_code = self.run_worker(ticket_file, state_file, fake)
+
+            self.assertEqual(exit_code, 0)
+            self.assertTrue(ticket_file.exists())
+            ticket_text = ticket_file.read_text(encoding='utf-8')
+            self.assertIn('command_id=pick-work:1', ticket_text)
+            self.assertIn('pick-work:1', state_file.read_text(encoding='utf-8'))
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     unittest.main()

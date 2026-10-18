@@ -1,61 +1,198 @@
-#!/usr/bin/env python3
+from __future__ import annotations
+
 import json
 import os
-import sys
+from contextlib import contextmanager
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any, Callable, Iterator
 
-from src.order_service import create_order_from_event
-from src.rds_inventory import inventory_json_from_rds
+from src.db_adapter import SQLiteCursorAdapter, open_connection as open_db_connection
+
+ROOT = Path(__file__).resolve().parents[1]
+INVENTORY_FILE = ROOT / 'data' / 'inventory.json'
+DB_DSN_ENV = 'DATABASE_URL'
+TINYWMS_DB_ENV = 'TINYWMS_DB'
+TINYWMS_SQLITE_PATH_ENV = 'TINYWMS_SQLITE_PATH'
+INVENTORY_QUERY_SQL = 'SELECT sku, description, bin_location, quantity, unit FROM inventory ORDER BY sku'
+INVENTORY_FOR_UPDATE_SQL = 'SELECT sku, description, bin_location, quantity, unit FROM inventory WHERE sku = %s FOR UPDATE'
+DECREMENT_INVENTORY_SQL = 'UPDATE inventory SET quantity = quantity - %s WHERE sku = %s AND quantity >= %s'
+INSERT_ORDER_SQL = 'INSERT INTO orders (order_id, status) VALUES (%s, %s)'
+INSERT_ORDER_LINE_SQL = 'INSERT INTO order_lines (order_id, sku, quantity) VALUES (%s, %s, %s)'
 
 
-def build_response(status_code, body_obj):
+class InventoryError(Exception):
+    pass
+
+
+class OrderValidationError(InventoryError):
+    pass
+
+
+class InventoryShortageError(InventoryError):
+    pass
+
+
+@dataclass(frozen=True)
+class InventoryRow:
+    sku: str
+    description: str
+    bin_location: str
+    quantity: int
+    unit: str
+
+
+@dataclass(frozen=True)
+class OrderLine:
+    sku: str
+    quantity: int
+    description: str = ''
+
+
+@dataclass(frozen=True)
+class OrderRequest:
+    order_id: str
+    lines: list[OrderLine]
+
+
+def _load_inventory() -> list[dict[str, Any]]:
+    return json.loads(INVENTORY_FILE.read_text(encoding='utf-8'))
+
+
+def _map_inventory_row(row: Any) -> dict[str, Any]:
+    if isinstance(row, dict):
+        bin_location = row.get('bin_location', row.get('bin'))
+        return {
+            'sku': row['sku'],
+            'description': row['description'],
+            'bin_location': bin_location,
+            'quantity': row['quantity'],
+            'unit': row['unit'],
+        }
     return {
-        "statusCode": status_code,
-        "headers": {
-            "Content-Type": "application/json"
-        },
-        "isBase64Encoded": False,
-        "body": json.dumps(body_obj, indent=2, sort_keys=True)
+        'sku': row[0],
+        'description': row[1],
+        'bin_location': row[2],
+        'quantity': row[3],
+        'unit': row[4],
     }
 
 
-def db_config_from_env():
-    return {
-        "host": os.environ["TINYWMS_DB_HOST"],
-        "port": int(os.environ.get("TINYWMS_DB_PORT", "5432")),
-        "dbname": os.environ["TINYWMS_DB_NAME"],
-        "user": os.environ["TINYWMS_DB_USER"],
-        "password": os.environ["TINYWMS_DB_PASSWORD"],
-    }
+def _cursor_for_connection(connection):
+    cursor = connection.cursor()
+    if connection.__class__.__module__ == 'sqlite3':
+        return SQLiteCursorAdapter(cursor)
+    return cursor
 
 
-def handler(event, context):
-    method = event.get("httpMethod")
-    path = event.get("path")
+def _read_inventory_rows(connection) -> list[dict[str, Any]]:
+    cursor = _cursor_for_connection(connection)
+    try:
+        cursor.execute(INVENTORY_QUERY_SQL)
+        rows = cursor.fetchall()
+        return [_map_inventory_row(row) for row in rows]
+    finally:
+        cursor.close()
 
-    if method == "GET" and path == "/inventory":
+
+def _postgres_connection():
+    dsn = os.environ.get(DB_DSN_ENV)
+    if not dsn:
+        raise RuntimeError('DATABASE_URL is required when TINYWMS_DB=postgres')
+    try:
+        import psycopg
+    except ModuleNotFoundError:
+        import psycopg2 as psycopg  # type: ignore
+    return psycopg.connect(dsn)
+
+
+@contextmanager
+def open_connection(dsn: str | None = None) -> Iterator[Any]:
+    backend = os.environ.get(TINYWMS_DB_ENV, 'postgres').strip().lower()
+    if backend == 'sqlite':
+        with open_db_connection() as connection:
+            yield connection
+        return
+    connection = _postgres_connection() if dsn is None else _postgres_connection_from_dsn(dsn)
+    try:
+        yield connection
+    finally:
+        connection.close()
+
+
+def _postgres_connection_from_dsn(dsn: str):
+    try:
+        import psycopg
+    except ModuleNotFoundError:
+        import psycopg2 as psycopg  # type: ignore
+    return psycopg.connect(dsn)
+
+
+def _validate_order(order: OrderRequest) -> None:
+    if not order.order_id:
+        raise OrderValidationError('order_id must be a non-empty string')
+    if not order.lines:
+        raise OrderValidationError('lines must be a non-empty array')
+    for line in order.lines:
+        if not line.sku:
+            raise OrderValidationError('line sku must be a non-empty string')
+        if line.quantity < 1:
+            raise OrderValidationError('line quantity must be a positive integer')
+
+
+def _normalize_order(order) -> OrderRequest:
+    if isinstance(order, OrderRequest):
+        return order
+    lines = [OrderLine(**line) for line in order['lines']]
+    return OrderRequest(order_id=order['order_id'], lines=lines)
+
+
+def place_order(connection, order: OrderRequest) -> dict[str, Any]:
+    _validate_order(order)
+    cursor = _cursor_for_connection(connection)
+    try:
+        cursor.execute('BEGIN')
+        locked_rows: list[dict[str, Any]] = []
+        for line in order.lines:
+            cursor.execute(INVENTORY_FOR_UPDATE_SQL, (line.sku,))
+            row = cursor.fetchone()
+            if row is None:
+                raise InventoryShortageError(f'unknown sku: {line.sku}')
+            inventory = _map_inventory_row(row)
+            if inventory['quantity'] < line.quantity:
+                raise InventoryShortageError(f'insufficient inventory for {line.sku}')
+            cursor.execute(DECREMENT_INVENTORY_SQL, (line.quantity, line.sku, line.quantity))
+            if cursor.rowcount != 1:
+                raise InventoryShortageError(f'insufficient inventory for {line.sku}')
+            locked_rows.append(inventory)
+        cursor.execute(INSERT_ORDER_SQL, (order.order_id, 'accepted'))
+        for line in order.lines:
+            cursor.execute(INSERT_ORDER_LINE_SQL, (order.order_id, line.sku, line.quantity))
+        connection.commit()
+        return {
+            'order_id': order.order_id,
+            'status': 'accepted',
+            'lines': [
+                {'sku': line.sku, 'quantity': line.quantity, 'description': line.description}
+                for line in order.lines
+            ],
+        }
+    except Exception:
+        connection.rollback()
+        raise
+    finally:
+        cursor.close()
+
+
+def handler(event, context, connection_factory=None):
+    event = event or {}
+    query_string = event.get('queryStringParameters') or {}
+    if query_string.get('demo') == 'local-json':
+        payload = _load_inventory()
+    else:
+        connection = (connection_factory or open_connection)()
         try:
-            inventory_doc = inventory_json_from_rds(**db_config_from_env())
-        except KeyError as exc:
-            return build_response(500, {"error": "missing database configuration", "missing": str(exc)})
-        except Exception as exc:
-            return build_response(500, {"error": "database unavailable", "details": str(exc)})
-        return build_response(200, inventory_doc)
-
-    if method == "POST" and path == "/orders":
-        try:
-            return create_order_from_event(event, db_config_from_env())
-        except KeyError as exc:
-            return build_response(500, {"error": "missing database configuration", "missing": str(exc)})
-
-    return build_response(404, {"error": "not found", "method": method, "path": path})
-
-
-def main(argv):
-    event = json.load(sys.stdin)
-    response = handler(event, None)
-    print(json.dumps(response, indent=2, sort_keys=True))
-    return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main(sys.argv))
+            payload = _read_inventory_rows(connection)
+        finally:
+            connection.close()
+    return {'statusCode': 200, 'headers': {'Content-Type': 'application/json'}, 'body': json.dumps(payload)}

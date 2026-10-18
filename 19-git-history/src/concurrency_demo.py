@@ -1,162 +1,105 @@
 #!/usr/bin/env python3
-import json
-import sqlite3
-import sys
-import tempfile
+from __future__ import annotations
+
+import os
 import threading
-import time
+from dataclasses import dataclass
 from pathlib import Path
 
-from src.rds_inventory import InsufficientInventoryError, create_order_with_connection
+from src.lambda_inventory import InventoryShortageError, OrderLine, OrderRequest, place_order
 
 
-def setup_demo_db(db_path, quantity=1):
-    connection = sqlite3.connect(db_path)
-    connection.executescript(
-        f"""
-        CREATE TABLE products (
-            sku TEXT PRIMARY KEY,
-            description TEXT NOT NULL,
-            unit TEXT NOT NULL
-        );
-        CREATE TABLE inventory_locations (
-            sku TEXT NOT NULL,
-            bin TEXT NOT NULL,
-            quantity INTEGER NOT NULL,
-            PRIMARY KEY (sku, bin)
-        );
-        CREATE TABLE orders (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            customer TEXT NOT NULL,
-            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-        );
-        CREATE TABLE order_lines (
-            order_id INTEGER NOT NULL,
-            line_number INTEGER NOT NULL,
-            sku TEXT NOT NULL,
-            quantity INTEGER NOT NULL,
-            PRIMARY KEY (order_id, line_number)
-        );
-        INSERT INTO products VALUES ('SKU-RACE', 'Last item demo', 'each');
-        INSERT INTO inventory_locations VALUES ('SKU-RACE', 'R1-01', {int(quantity)});
-        """
-    )
-    connection.commit()
-    connection.close()
+@dataclass
+class DemoInventory:
+    quantity: int
 
 
-def remaining_quantity(db_path):
-    connection = sqlite3.connect(db_path)
-    quantity = connection.execute(
-        "SELECT quantity FROM inventory_locations WHERE sku = ?",
-        ("SKU-RACE",),
-    ).fetchone()[0]
-    connection.close()
-    return quantity
+class DemoCursor:
+    def __init__(self, inventory: DemoInventory, barrier: threading.Barrier):
+        self.inventory = inventory
+        self.barrier = barrier
+        self.rowcount = 0
+        self._row = None
 
-
-def order_count(db_path):
-    connection = sqlite3.connect(db_path)
-    count = connection.execute("SELECT COUNT(*) FROM orders").fetchone()[0]
-    connection.close()
-    return count
-
-
-def naive_worker(db_path, worker_name, barrier, results):
-    connection = sqlite3.connect(db_path, timeout=5, isolation_level=None)
-    cursor = connection.cursor()
-    cursor.execute("SELECT quantity FROM inventory_locations WHERE sku = ?", ("SKU-RACE",))
-    available = int(cursor.fetchone()[0])
-    barrier.wait()
-    if available < 1:
-        results.append({"worker": worker_name, "status": "failed", "available_seen": available})
-        connection.close()
-        return
-    time.sleep(0.1)
-    cursor.execute("UPDATE inventory_locations SET quantity = ? WHERE sku = ?", (available - 1, "SKU-RACE"))
-    cursor.execute("INSERT INTO orders (customer) VALUES (?)", (worker_name,))
-    connection.commit()
-    results.append({"worker": worker_name, "status": "created", "available_seen": available})
-    connection.close()
-
-
-def run_naive_demo(db_path):
-    results = []
-    barrier = threading.Barrier(2)
-    threads = [
-        threading.Thread(target=naive_worker, args=(db_path, "worker-1", barrier, results)),
-        threading.Thread(target=naive_worker, args=(db_path, "worker-2", barrier, results)),
-    ]
-    for thread in threads:
-        thread.start()
-    for thread in threads:
-        thread.join()
-    return {
-        "mode": "naive",
-        "results": sorted(results, key=lambda item: item["worker"]),
-        "remainingQuantity": remaining_quantity(db_path),
-        "orderCount": order_count(db_path),
-    }
-
-
-def fixed_worker(db_path, worker_name, results):
-    connection = sqlite3.connect(db_path, timeout=5, isolation_level=None)
-    try:
-        result = create_order_with_connection(
-            connection,
-            {
-                "customer": worker_name,
-                "lines": [{"sku": "SKU-RACE", "quantity": 1}],
-            },
-        )
-        results.append({"worker": worker_name, "status": result["status"]})
-    except InsufficientInventoryError as exc:
-        results.append(
-            {
-                "worker": worker_name,
-                "status": "failed",
-                "error": "insufficient inventory",
-                "requested": exc.requested,
-                "available": exc.available,
-            }
-        )
-    finally:
-        connection.close()
-
-
-def run_fixed_demo(db_path):
-    results = []
-    threads = [
-        threading.Thread(target=fixed_worker, args=(db_path, "worker-1", results)),
-        threading.Thread(target=fixed_worker, args=(db_path, "worker-2", results)),
-    ]
-    for thread in threads:
-        thread.start()
-    for thread in threads:
-        thread.join()
-    return {
-        "mode": "fixed",
-        "results": sorted(results, key=lambda item: item["worker"]),
-        "remainingQuantity": remaining_quantity(db_path),
-        "orderCount": order_count(db_path),
-    }
-
-
-def main(argv):
-    if len(argv) != 2 or argv[1] not in {"naive", "fixed"}:
-        print("usage: concurrency_demo.py <naive|fixed>", file=sys.stderr)
-        return 2
-
-    with tempfile.TemporaryDirectory() as tmp:
-        db_path = str(Path(tmp) / "tinywms-concurrency.sqlite")
-        setup_demo_db(db_path, quantity=1)
-        if argv[1] == "naive":
-            result = run_naive_demo(db_path)
+    def execute(self, sql, params=None):
+        if sql.startswith('SELECT sku, description, bin_location, quantity, unit FROM inventory WHERE sku = %s FOR UPDATE'):
+            self.barrier.wait()
+            self._row = ('SKU-DEMO', 'Demo widget', 'A1-01', self.inventory.quantity, 'each')
+        elif sql.startswith('UPDATE inventory SET quantity = quantity -'):
+            amount, sku, threshold = params
+            if self.inventory.quantity >= threshold:
+                self.inventory.quantity -= amount
+                self.rowcount = 1
+            else:
+                self.rowcount = 0
+        elif sql.startswith('INSERT INTO orders') or sql.startswith('INSERT INTO order_lines'):
+            self.rowcount = 1
+        elif sql == 'BEGIN':
+            self.rowcount = 0
         else:
-            result = run_fixed_demo(db_path)
-        print(json.dumps(result, indent=2, sort_keys=True))
+            raise AssertionError(f'unexpected SQL in demo: {sql}')
+
+    def fetchone(self):
+        return self._row
+
+    def close(self):
+        pass
+
+
+class DemoConnection:
+    def __init__(self, inventory: DemoInventory, barrier: threading.Barrier):
+        self.inventory = inventory
+        self.barrier = barrier
+        self.commits = 0
+        self.rollbacks = 0
+
+    def cursor(self):
+        return DemoCursor(self.inventory, self.barrier)
+
+    def commit(self):
+        self.commits += 1
+
+    def rollback(self):
+        self.rollbacks += 1
+
+    def close(self):
+        pass
+
+
+
+def _demo_connection_factory(inventory: DemoInventory, barrier: threading.Barrier):
+    return DemoConnection(inventory, barrier)
+
+
+
+def _run_attempt(name: str, inventory: DemoInventory, barrier: threading.Barrier, results: list[str]):
+    connection = _demo_connection_factory(inventory, barrier)
+    order = OrderRequest(order_id=name, lines=[OrderLine('SKU-DEMO', 1, 'Demo widget')])
+    try:
+        result = place_order(connection, order)
+        results.append(f'{name}: accepted {result}')
+    except InventoryShortageError as exc:
+        results.append(f'{name}: rejected {exc}')
+
+
+
+def main() -> int:
+    stock = int(os.environ.get('TINYWMS_DEMO_STOCK', '1'))
+    inventory = DemoInventory(quantity=stock)
+    barrier = threading.Barrier(2)
+    results: list[str] = []
+    first = threading.Thread(target=_run_attempt, args=('ORD-DEMO-1', inventory, barrier, results))
+    second = threading.Thread(target=_run_attempt, args=('ORD-DEMO-2', inventory, barrier, results))
+    print(f'demo starting with quantity={inventory.quantity}')
+    first.start()
+    second.start()
+    first.join()
+    second.join()
+    for line in results:
+        print(line)
+    print(f'final inventory quantity={inventory.quantity}')
     return 0
 
 
-if __name__ == "__main__":
-    raise SystemExit(main(sys.argv))
+if __name__ == '__main__':
+    raise SystemExit(main())

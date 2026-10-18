@@ -1,16 +1,18 @@
-# TinyWMS data contracts
+# TinyWMS Data Contracts
 
-## Inventory JSON document
-TinyWMS uses one top-level JSON object containing an `inventory` array.
+This document describes the first TinyWMS contract: inventory JSON.
+
+## Inventory JSON
+
+Inventory is stored as a JSON array of objects. Each object represents one stock item.
 
 ### Fields
-- `inventory` - array of product records
-- `inventory[].sku` - stable product identifier used by CLI, HTTP, and browser examples
-- `inventory[].description` - human-readable product description
-- `inventory[].bin` - warehouse bin or shelf location
-- `inventory[].quantity` - on-hand count as a non-negative integer
-- `inventory[].unit` - unit of measure such as `each`, `box`, or `case`
+- `sku` - unique stock keeping unit string used to identify the item.
+- `description` - human-readable item description.
+- `bin_location` - warehouse bin identifier where the item is stored.
+- `quantity` - on-hand count stored as a non-negative integer.
+- `unit` - quantity unit string such as `each` or `roll`.
 
-## Notes
-- This contract is intentionally small so beginning students can understand it immediately.
-- Later stages must preserve this JSON meaning unless a lesson explicitly says otherwise.
+### Notes
+- The CLI validates that these required fields are present before it lists or finds items.
+- The JSON file is the canonical interchange format for this stage.

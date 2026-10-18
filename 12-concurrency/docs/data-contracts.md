@@ -1,99 +1,88 @@
-# TinyWMS data contracts
+# TinyWMS Data Contracts
 
-## Inventory JSON document
-TinyWMS uses one top-level JSON object containing an `inventory` array.
+This document describes the TinyWMS inventory JSON contract, the order JSON contract introduced in Stage 11, and how the existing relational persistence maps those contracts into tables.
 
-### Fields
-- `inventory` - array of product records
-- `inventory[].sku` - stable product identifier used by CLI, HTTP, browser, Lambda, API Gateway, and relational mapping examples
-- `inventory[].description` - human-readable product description
-- `inventory[].bin` - warehouse bin or shelf location
-- `inventory[].quantity` - on-hand count as a non-negative integer
-- `inventory[].unit` - unit of measure such as `each`, `box`, or `case`
+SQLite cannot demonstrate the PostgreSQL row-lock lesson.
 
-## Order request JSON document
-TinyWMS orders use one top-level JSON object with a customer name and one or more requested lines.
+## Inventory JSON
+
+Inventory is stored as a JSON array of objects. Each object represents one stock item and is reused by the CLI, the Linux demo tools, the HTTP server, the browser page, the EC2 deployment wrapper, and the Lambda handler.
 
 ### Fields
-- `customer` - human-readable customer or class/store name submitting the order
-- `lines` - array of requested order lines
-- `lines[].sku` - product SKU being requested
-- `lines[].quantity` - requested quantity as a positive integer
+- `sku` - unique stock keeping unit string used to identify the item.
+- `description` - human-readable item description.
+- `bin_location` - warehouse bin identifier where the item is stored.
+- `quantity` - on-hand count stored as a non-negative integer.
+- `unit` - quantity unit string such as `each` or `roll`.
 
-### Example
-```json
-{
-  "customer": "Example School Store",
-  "lines": [
-    { "sku": "SKU-1001", "quantity": 2 },
-    { "sku": "SKU-1003", "quantity": 1 }
-  ]
-}
-```
+### Notes
+- The CLI validates that these required fields are present before it lists or finds items.
+- The HTTP server returns this same JSON structure unchanged at `GET /inventory`.
+- The browser page fetches the same JSON structure and renders it as a table.
+- The EC2 deployment wrapper does not change the JSON contract; it only changes where the same HTTP process is started.
+- The Lambda handler returns the same inventory JSON contract from a different compute boundary.
+- The JSON file remains the canonical interchange format for this stage.
 
-## Order success response JSON document
-A successful `POST /orders` returns a small JSON object describing what was committed.
+## Order JSON
+
+Stage 11 introduces a minimal order contract for submitting warehouse orders.
 
 ### Fields
-- `orderId` - database-generated order identifier
-- `customer` - copied from the request
-- `lines` - committed order lines
-- `lines[].sku` - SKU that was written to `order_lines`
-- `lines[].quantity` - quantity that was committed
-- `status` - simple teaching field set to `created`
+- `order_id` - unique order identifier string.
+- `lines` - non-empty array of order line objects.
 
-## Order failure response JSON document
-The order path returns visible JSON errors rather than silent failures.
+### Order line fields
+- `sku` - inventory SKU to decrement.
+- `quantity` - positive integer quantity to reserve.
+- `description` - optional human-readable description carried by the browser and handler for visibility.
 
-### Common fields
-- `error` - short machine-readable error summary
-- `details` - optional list or string explaining what was wrong
+### Notes
+- The browser sends visible JSON to `POST /orders` and shows the request and response JSON.
+- The local HTTP server validates order JSON, writes orders and order lines in a transaction, decrements inventory, and returns accepted/rejected JSON.
+- The Lambda handler uses the same request/response contract so the deployed HTTP path can remain stable.
+- Stage 12 keeps the same order JSON contract and tightens the transaction boundary so concurrent attempts cannot oversell inventory.
 
-### Insufficient inventory failure
-When requested quantity exceeds available stock, or when another concurrent transaction consumes the remaining stock first, the handler returns:
-- `error` - `insufficient inventory`
-- `sku` - SKU that could not be satisfied
-- `requested` - requested quantity
-- `available` - available quantity visible to the failing transaction at the time it detects the problem
+## Relational mapping introduced in Stage 8
 
-## Relational mapping
-The relational lessons keep the same inventory meaning but store it in tables.
+Stage 8 introduces a minimal relational representation for the existing inventory JSON data. The mapping is intentionally one-to-one so students can compare the two forms without extra abstraction.
 
-### Table: `products`
-- `sku` - primary key, copied from `inventory[].sku`
-- `description` - copied from `inventory[].description`
-- `unit` - copied from `inventory[].unit`
-
-### Table: `inventory_locations`
-- `sku` - foreign key to `products.sku`
-- `bin` - copied from `inventory[].bin`
-- `quantity` - copied from `inventory[].quantity`
+### Table: `inventory`
+- `sku TEXT PRIMARY KEY` - maps from `sku`.
+- `description TEXT NOT NULL` - maps from `description`.
+- `bin_location TEXT NOT NULL` - maps from `bin_location`.
+- `quantity INTEGER NOT NULL CHECK (quantity >= 0)` - maps from `quantity`.
+- `unit TEXT NOT NULL` - maps from `unit`.
 
 ### Table: `orders`
-- `id` - generated order identifier returned as `orderId`
-- `customer` - copied from order request `customer`
-- `created_at` - database timestamp showing when the order row was inserted
+- `order_id TEXT PRIMARY KEY` - maps from `order_id`.
+- `status TEXT NOT NULL` - visible order state such as `accepted`.
 
 ### Table: `order_lines`
-- `order_id` - foreign key to `orders.id`
-- `line_number` - explicit visible line ordering
-- `sku` - copied from request `lines[].sku`
-- `quantity` - copied from request `lines[].quantity`
+- `order_id TEXT NOT NULL` - references `orders.order_id`.
+- `sku TEXT NOT NULL` - references `inventory.sku`.
+- `quantity INTEGER NOT NULL CHECK (quantity > 0)` - maps from the submitted line quantity.
 
-### RDS note
-When the database is moved to Amazon RDS, the table structure and mapping do not change. Only the operational home of the same schema changes.
+### Seed source
+The seed script is derived from `data/inventory.json` and loads the same sample rows into the relational table. The row values should match the JSON file exactly so students can compare file output, SQL inserts, and database contents.
 
-### Lambda-to-RDS note
-When Lambda reads inventory from RDS, it must convert database rows back into the exact inventory JSON document shape. When Lambda writes orders to RDS, it must preserve the order request meaning while exposing success and failure as JSON.
+### Database selection
+- `TINYWMS_DB=sqlite` selects the local classroom path.
+- `TINYWMS_DB=postgres` selects the PostgreSQL path and remains the default.
+- `TINYWMS_SQLITE_PATH` chooses the SQLite database file when the SQLite path is selected.
 
-## JSON-to-table mapping notes
-- One JSON inventory item becomes one `products` row and one `inventory_locations` row.
-- One order JSON document becomes one `orders` row and one or more `order_lines` rows.
-- The order transaction must either write all related rows and decrements or write none of them.
-- In the concurrency lesson, the visible SQL strategy is: insert the order row, then decrement inventory with a conditional `UPDATE` that succeeds only when enough quantity remains.
-- The JSON documents remain the teaching contracts for application boundaries.
-- SQL is used for persistence; Lambda reads SQL rows and emits JSON response bodies used by the earlier and current stages.
+### Stage 9 RDS note
+RDS does not change the logical schema. It changes who operates the PostgreSQL server and where the endpoint comes from.
 
-## Notes
-- The model stays intentionally small so beginning students can understand it immediately.
-- Later stages must preserve this JSON meaning unless a lesson explicitly says otherwise.
+- In the self-managed Linux path, students and instructors are responsible for installing, starting, securing, and stopping the database process.
+- In the RDS path, AWS operates the database process, storage, backups, endpoint lifecycle, and patching responsibilities within the scope of the lesson.
+- The application still speaks the same SQL schema and reads the same visible relational columns.
+
+### Stage 12 concurrency note
+Stage 12 demonstrates why overlapping order attempts need a transaction strategy that prevents overselling. The lesson uses a concurrency demo plus database assertions to show that only one order can consume the final unit of stock.
+
+- SQLite remains useful for transaction smoke tests and rollback proofs.
+- PostgreSQL is the path for the real row-lock lesson, because the concurrency boundary is visible there with `SELECT ... FOR UPDATE` or an equivalent atomic quantity guard.
+- SQLite cannot demonstrate the PostgreSQL row-lock lesson.
+
+### Teaching note
+SQLite is used here to make the lesson runnable on a student laptop, but it is still a local file-backed database. It does not demonstrate a separate database server process, network port, or row-locking behavior. PostgreSQL remains the path for instructor demonstrations of the later operational lessons, and RDS is the managed hosting version of that PostgreSQL path.

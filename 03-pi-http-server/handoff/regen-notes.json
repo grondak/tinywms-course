@@ -1,0 +1,65 @@
+{
+  "current_stage": "03-pi-http-server",
+  "notes": [
+    {
+      "boundary_change": "",
+      "components": {
+        "added": "",
+        "replaced_or_evolved": "",
+        "reused_unchanged": ""
+      },
+      "continuity_checks": [
+        "README file-map paths must exist in the stage snapshot.",
+        "Inherited contracts remain stable unless this stage prompt explicitly changes them."
+      ],
+      "inherited_contract": "",
+      "stage": "00-establish-repository",
+      "summary": "Establish the TinyWMS repository scaffold and teaching docs with no runnable application yet."
+    },
+    {
+      "boundary_change": "TinyWMS now has a visible JSON file boundary and a Python CLI process boundary.",
+      "components": {
+        "added": "`data/inventory.json`, `data/inventory.schema.json`, `src/inventory_cli.py`, `tests/test_inventory_cli.py`.",
+        "replaced_or_evolved": "`README.md`, `docs/architecture.md`, and `docs/data-contracts.md` evolve from repository-establishment guidance into concrete inventory contract documentation.",
+        "reused_unchanged": "the directory scaffold from Stage 0 (`docs/`, `data/`, `src/`, `tests/`) remains in place."
+      },
+      "continuity_checks": [
+        "README file-map paths must exist in the stage snapshot.",
+        "Inherited contracts remain stable unless this stage prompt explicitly changes them."
+      ],
+      "inherited_contract": "the repository scaffold and teaching-document structure from Stage 0 remain valid.",
+      "stage": "01-json-backbone",
+      "summary": "Define TinyWMS's initial JSON inventory contract and a small Python CLI that can load, validate, list, find, and emit inventory JSON. Add inherited Python tests for the new runnable component so the stage has a visible safety net."
+    },
+    {
+      "boundary_change": "TinyWMS now exposes additional Linux process behavior through small demo tools, including stderr and exit codes, plus a long-running watcher process with a log file.",
+      "components": {
+        "added": "`src/linux_visible.py`, `src/inventory_watcher.py`, `tests/test_linux_visible.py`, `tests/test_inventory_watcher.py`.",
+        "replaced_or_evolved": "`README.md` and `docs/architecture.md` are expanded to teach Linux visibility and to document the new process/file boundaries.",
+        "reused_unchanged": "`data/inventory.json`, `data/inventory.schema.json`, `src/inventory_cli.py`, and `tests/test_inventory_cli.py` are carried forward exactly from Stage 1."
+      },
+      "continuity_checks": [
+        "README file-map paths must exist in the stage snapshot.",
+        "Inherited contracts remain stable unless this stage prompt explicitly changes them."
+      ],
+      "inherited_contract": "the inventory JSON file, schema, and CLI from Stage 1 remain valid and continue to define the data shape.",
+      "stage": "02-linux-visible",
+      "summary": "Extend the Stage 1 JSON backbone with small Linux-visible demo tools that make stdin, stdout, stderr, exit codes, environment variables, files, and long-running processes easy for students to observe. Reuse `data/inventory.json`, `data/inventory.schema.json`, `src/inventory_cli.py`, and the Stage 1 tests unchanged; add new Linux-observability components alongside them without introducing HTTP yet."
+    },
+    {
+      "boundary_change": "TinyWMS now exposes the inventory JSON over HTTP with an explicit listening port, request path, response status, headers, and body.",
+      "components": {
+        "added": "`src/http_server.py` and `tests/test_http_server.py`.",
+        "replaced_or_evolved": "`README.md` and `docs/architecture.md` are expanded to teach the HTTP boundary and to show how the server depends on the existing inventory JSON contract.",
+        "reused_unchanged": "`data/inventory.json`, `data/inventory.schema.json`, `src/inventory_cli.py`, `src/linux_visible.py`, `src/inventory_watcher.py`, and their earlier tests are carried forward as the same teaching contracts."
+      },
+      "continuity_checks": [
+        "README file-map paths must exist in the stage snapshot.",
+        "Inherited contracts remain stable unless this stage prompt explicitly changes them."
+      ],
+      "inherited_contract": "the inventory JSON file, schema, CLI, and Linux-visible helper scripts from earlier stages remain valid and unchanged.",
+      "stage": "03-pi-http-server",
+      "summary": "Add the smallest transparent Python HTTP server that serves the existing inventory JSON at GET /inventory on Raspberry Pi Linux and EC2 Linux. Preserve the Stage 1 JSON contract and Stage 2 Linux-visible tools unchanged, introduce environment-driven port configuration, and add curl-based teaching guidance and tests for HTTP status, headers, and JSON body visibility."
+    }
+  ]
+}

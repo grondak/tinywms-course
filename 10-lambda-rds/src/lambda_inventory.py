@@ -1,50 +1,126 @@
-#!/usr/bin/env python3
+from __future__ import annotations
+
 import json
 import os
-import sys
+from contextlib import contextmanager
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any, Callable, Iterator
 
-from src.rds_inventory import inventory_json_from_rds
+from src.db_adapter import SQLiteCursorAdapter, open_connection as open_db_connection
+
+ROOT = Path(__file__).resolve().parents[1]
+INVENTORY_FILE = ROOT / 'data' / 'inventory.json'
+DB_DSN_ENV = 'DATABASE_URL'
+TINYWMS_DB_ENV = 'TINYWMS_DB'
+TINYWMS_SQLITE_PATH_ENV = 'TINYWMS_SQLITE_PATH'
+INVENTORY_QUERY_SQL = 'SELECT sku, description, bin_location, quantity, unit FROM inventory ORDER BY sku'
 
 
-def build_response(status_code, body_obj):
+class InventoryError(Exception):
+    pass
+
+
+class DatabaseInventoryError(InventoryError):
+    pass
+
+
+@dataclass(frozen=True)
+class InventoryRow:
+    sku: str
+    description: str
+    bin_location: str
+    quantity: int
+    unit: str
+
+
+def _load_inventory() -> list[dict[str, Any]]:
+    return json.loads(INVENTORY_FILE.read_text(encoding='utf-8'))
+
+
+def _map_inventory_row(row: Any) -> dict[str, Any]:
+    if isinstance(row, dict):
+        bin_location = row.get('bin_location', row.get('bin'))
+        return {
+            'sku': row['sku'],
+            'description': row['description'],
+            'bin_location': bin_location,
+            'quantity': row['quantity'],
+            'unit': row['unit'],
+        }
     return {
-        "statusCode": status_code,
-        "headers": {
-            "Content-Type": "application/json"
-        },
-        "isBase64Encoded": False,
-        "body": json.dumps(body_obj, indent=2, sort_keys=True)
+        'sku': row[0],
+        'description': row[1],
+        'bin_location': row[2],
+        'quantity': row[3],
+        'unit': row[4],
     }
 
 
-def handler(event, context):
-    method = event.get("httpMethod")
-    path = event.get("path")
-    if method != "GET" or path != "/inventory":
-        return build_response(404, {"error": "not found", "method": method, "path": path})
+def _cursor_for_connection(connection):
+    cursor = connection.cursor()
+    if connection.__class__.__module__ == 'sqlite3':
+        return SQLiteCursorAdapter(cursor)
+    return cursor
 
+
+def _read_inventory_rows(connection) -> list[dict[str, Any]]:
+    cursor = _cursor_for_connection(connection)
     try:
-        inventory_doc = inventory_json_from_rds(
-            host=os.environ["TINYWMS_DB_HOST"],
-            port=int(os.environ.get("TINYWMS_DB_PORT", "5432")),
-            dbname=os.environ["TINYWMS_DB_NAME"],
-            user=os.environ["TINYWMS_DB_USER"],
-            password=os.environ["TINYWMS_DB_PASSWORD"],
-        )
-    except KeyError as exc:
-        return build_response(500, {"error": "missing database configuration", "missing": str(exc)})
-    except Exception as exc:
-        return build_response(500, {"error": "database unavailable", "details": str(exc)})
-
-    return build_response(200, inventory_doc)
+        cursor.execute(INVENTORY_QUERY_SQL)
+        rows = cursor.fetchall()
+        return [_map_inventory_row(row) for row in rows]
+    finally:
+        cursor.close()
 
 
-def main(argv):
-    event = json.load(sys.stdin)
-    response = handler(event, None)
-    print(json.dumps(response, indent=2, sort_keys=True))
-    return 0
+def _postgres_connection():
+    dsn = os.environ.get(DB_DSN_ENV)
+    if not dsn:
+        raise RuntimeError('DATABASE_URL is required when TINYWMS_DB=postgres')
+    try:
+        import psycopg
+    except ModuleNotFoundError:
+        import psycopg2 as psycopg  # type: ignore
+    return psycopg.connect(dsn)
 
 
-if __name__ == "__main__":
-    raise SystemExit(main(sys.argv))
+@contextmanager
+def open_connection(dsn: str | None = None) -> Iterator[Any]:
+    backend = os.environ.get(TINYWMS_DB_ENV, 'postgres').strip().lower()
+    if backend == 'sqlite':
+        with open_db_connection() as connection:
+            yield connection
+        return
+    connection = _postgres_connection() if dsn is None else _postgres_connection_from_dsn(dsn)
+    try:
+        yield connection
+    finally:
+        connection.close()
+
+
+def _postgres_connection_from_dsn(dsn: str):
+    try:
+        import psycopg
+    except ModuleNotFoundError:
+        import psycopg2 as psycopg  # type: ignore
+    return psycopg.connect(dsn)
+
+
+def handler(event, context, connection_factory: Callable[[], Any] | None = None):
+    event = event or {}
+    query_string = event.get('queryStringParameters') or {}
+    if query_string.get('demo') == 'local-json':
+        payload = _load_inventory()
+    else:
+        factory = connection_factory or open_connection
+        connection = factory()
+        try:
+            payload = _read_inventory_rows(connection)
+        finally:
+            connection.close()
+    return {
+        'statusCode': 200,
+        'headers': {'Content-Type': 'application/json'},
+        'body': json.dumps(payload),
+    }

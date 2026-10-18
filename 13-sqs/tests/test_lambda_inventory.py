@@ -1,77 +1,120 @@
 import json
-import os
 import unittest
 from unittest import mock
+from src.lambda_inventory import INVENTORY_QUERY_SQL, OrderLine, OrderRequest, InventoryShortageError, handler, place_order
 
-from src import lambda_inventory
+class FakeCursor:
 
+    def __init__(self, rows):
+        self.rows = rows
+        self.executed = []
+        self.closed = False
+        self.rowcount = 0
+        self.fetchone_calls = 0
+
+    def execute(self, sql, params=None):
+        self.executed.append((sql, params))
+        if sql.startswith('UPDATE inventory SET quantity = quantity -'):
+            self.rowcount = 1
+        if sql.startswith('SELECT sku, description, bin_location, quantity, unit FROM inventory WHERE sku = %s FOR UPDATE'):
+            self.fetchone_calls += 1
+
+    def fetchall(self):
+        return self.rows
+
+    def fetchone(self):
+        if not self.rows:
+            return None
+        value = self.rows[min(self.fetchone_calls - 1, len(self.rows) - 1)]
+        return value
+
+    def close(self):
+        self.closed = True
+
+class FakeConnection:
+
+    def __init__(self, rows):
+        self.rows = rows
+        self.cursor_obj = FakeCursor(rows)
+        self.closed = False
+        self.commits = 0
+        self.rollbacks = 0
+
+    def cursor(self):
+        return self.cursor_obj
+
+    def commit(self):
+        self.commits += 1
+
+    def rollback(self):
+        self.rollbacks += 1
+
+    def close(self):
+        self.closed = True
+
+class FakeSqsClient:
+
+    def __init__(self):
+        self.calls = []
+
+    def send_message(self, **kwargs):
+        self.calls.append(kwargs)
+        return {'MessageId': f'm-{len(self.calls)}'}
 
 class LambdaInventoryTests(unittest.TestCase):
-    def test_handler_returns_inventory(self):
-        with mock.patch.dict(os.environ, {
-            "TINYWMS_DB_HOST": "db.example",
-            "TINYWMS_DB_PORT": "5432",
-            "TINYWMS_DB_NAME": "tinywms",
-            "TINYWMS_DB_USER": "tinywms",
-            "TINYWMS_DB_PASSWORD": "secret",
-        }), mock.patch("src.lambda_inventory.inventory_json_from_rds") as inventory_json_from_rds:
-            inventory_json_from_rds.return_value = {
-                "inventory": [
-                    {
-                        "sku": "SKU-1001",
-                        "description": "Blue widget",
-                        "bin": "A1-01",
-                        "quantity": 24,
-                        "unit": "each",
-                    }
-                ]
-            }
-            response = lambda_inventory.handler({"httpMethod": "GET", "path": "/inventory"}, None)
-        self.assertEqual(response["statusCode"], 200)
-        body = json.loads(response["body"])
-        self.assertEqual(body["inventory"][0]["sku"], "SKU-1001")
 
-    def test_handler_creates_order(self):
-        event = {
-            "httpMethod": "POST",
-            "path": "/orders",
-            "body": json.dumps({
-                "customer": "Example School Store",
-                "lines": [{"sku": "SKU-1001", "quantity": 2}]
-            })
-        }
-        with mock.patch.dict(os.environ, {
-            "TINYWMS_DB_HOST": "db.example",
-            "TINYWMS_DB_PORT": "5432",
-            "TINYWMS_DB_NAME": "tinywms",
-            "TINYWMS_DB_USER": "tinywms",
-            "TINYWMS_DB_PASSWORD": "secret",
-        }), mock.patch("src.order_service.create_order_in_rds") as create_order_in_rds:
-            create_order_in_rds.return_value = {
-                "orderId": 7,
-                "customer": "Example School Store",
-                "status": "created",
-                "lines": [{"sku": "SKU-1001", "quantity": 2}]
-            }
-            response = lambda_inventory.handler(event, None)
-        self.assertEqual(response["statusCode"], 201)
-        body = json.loads(response["body"])
-        self.assertEqual(body["orderId"], 7)
-        self.assertEqual(body["status"], "created")
+    def test_handler_returns_inventory_json_from_injected_database_rows(self):
+        rows = [('SKU-001', 'Blue widget', 'A1-01', 24, 'each'), ('SKU-002', 'Red widget', 'A1-02', 12, 'each')]
+        connection = FakeConnection(rows)
+        result = handler({}, None, connection_factory=lambda: connection)
+        self.assertEqual(result['statusCode'], 200)
+        self.assertEqual(result['headers']['Content-Type'], 'application/json')
+        payload = json.loads(result['body'])
+        self.assertEqual(payload[0]['sku'], 'SKU-001')
+        self.assertEqual(payload[0]['description'], 'Blue widget')
+        self.assertEqual(payload[0]['bin_location'], 'A1-01')
+        self.assertEqual(payload[1]['quantity'], 12)
+        self.assertEqual(connection.cursor_obj.executed[0][0], INVENTORY_QUERY_SQL)
+        self.assertTrue(connection.cursor_obj.closed)
+        self.assertTrue(connection.closed)
 
-    def test_handler_rejects_wrong_route(self):
-        response = lambda_inventory.handler({"httpMethod": "GET", "path": "/nope"}, None)
-        self.assertEqual(response["statusCode"], 404)
-        body = json.loads(response["body"])
-        self.assertEqual(body["error"], "not found")
+    def test_local_demo_path_still_reads_json_explicitly(self):
+        with mock.patch.dict('os.environ', {}, clear=True):
+            result = handler({'queryStringParameters': {'demo': 'local-json'}}, None)
+        payload = json.loads(result['body'])
+        self.assertEqual(payload[0]['sku'], 'SKU-1001')
+        self.assertEqual(result['statusCode'], 200)
 
-    def test_handler_reports_missing_config(self):
-        with mock.patch.dict(os.environ, {}, clear=True):
-            response = lambda_inventory.handler({"httpMethod": "GET", "path": "/inventory"}, None)
-        self.assertEqual(response["statusCode"], 500)
-        body = json.loads(response["body"])
-        self.assertEqual(body["error"], "missing database configuration")
+    def test_place_order_sends_commands_after_commit_after_commit(self):
+        rows = [('SKU-001', 'Blue widget', 'A1-01', 2, 'each'), ('SKU-002', 'Red widget', 'A1-02', 3, 'each')]
+        connection = FakeConnection(rows)
+        sqs = FakeSqsClient()
+        order = OrderRequest('ORD-2001', [OrderLine('SKU-001', 1, 'Blue widget'), OrderLine('SKU-002', 2, 'Red widget')])
+        result = place_order(connection, order, sqs_client=sqs)
+        self.assertEqual(result['status'], 'accepted')
+        self.assertEqual(connection.commits, 1)
+        self.assertEqual(connection.rollbacks, 0)
+        self.assertEqual(len(sqs.calls), 2)
+        self.assertTrue(all((call['QueueUrl'] == '' for call in sqs.calls)))
+        self.assertEqual(json.loads(sqs.calls[0]['MessageBody'])['sku'], 'SKU-001')
+        self.assertEqual(json.loads(sqs.calls[1]['MessageBody'])['bin'], 'A1-02')
+        self.assertTrue(connection.cursor_obj.closed)
 
+    def test_place_order_rolls_back_without_sending_commands(self):
+        rows = [('SKU-001', 'Blue widget', 'A1-01', 1, 'each')]
+        connection = FakeConnection(rows)
+        sqs = FakeSqsClient()
+        order = OrderRequest('ORD-2002', [OrderLine('SKU-001', 2, 'Blue widget')])
+        with self.assertRaises(InventoryShortageError):
+            place_order(connection, order, sqs_client=sqs)
+        self.assertEqual(connection.commits, 0)
+        self.assertEqual(connection.rollbacks, 1)
+        self.assertEqual(sqs.calls, [])
 
-if __name__ == "__main__":
+    def test_validation_failure_happens_before_connection_factory(self):
+        factory = mock.Mock(side_effect=AssertionError('connection should not be opened'))
+        response = handler({'httpMethod': 'POST', 'body': json.dumps({'order_id': '', 'lines': []})}, None, connection_factory=factory, sqs_client=FakeSqsClient())
+        self.assertEqual(response['statusCode'], 400)
+        factory.assert_not_called()
+if __name__ == '__main__':
     unittest.main()

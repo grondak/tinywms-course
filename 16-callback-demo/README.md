@@ -1,60 +1,49 @@
 # TinyWMS lesson: 16-callback-demo
 
 ## Stage purpose
-This stage prepares an instructor demo of the full asynchronous TinyWMS callback path. Students can place an order from the browser, watch the HTTP request and JSON response, inspect the Lambda/API event shape, see the JSON command and event documents, and finally observe the Linux worker append a human-readable pick ticket to `pick-tickets.txt` with `tail -f`.
+This stage lets an instructor trace one TinyWMS order all the way from the browser and HTTP server to the Lambda order handler, database transaction boundary, queue command, worker, and final pick ticket file. The focus is the full callback chain and the visible JSON at each boundary, not new business features.
 
 ## Files in this lesson
-- `docs/demo-runbook.md` - step-by-step instructor demo script tracing each boundary and naming the JSON passed at each hop
-- `src/demo_trace.py` - prints the visible JSON artifacts used along the end-to-end path so students can compare request, command, event, and file output representations
-- `deploy/demo/run-callback-demo.sh` - helper wrapper that runs the local trace script for a quick continuity demo
-- `docs/architecture.md` - updated to describe the callback-style demonstration from browser action to Linux file append
-- `docs/data-contracts.md` - updated with a boundary-by-boundary summary of the JSON documents visible in the callback demo
-- `tests/test_demo_trace.py` - tests the demo trace helper so the stage keeps runnable verified artifacts
-
+- `README.md` - lesson guide for the end-to-end callback path and the local proof.
+- `docs/architecture.md` - updated component map showing the assembled chain and the Stage 16 callback proof.
+- `docs/data-contracts.md` - contract notes that keep the command, event, and ticket representations visible.
+- `docs/end-to-end.md` - instructor walkthrough of the full order path from browser to file output.
+- `tests/test_callback_integration.py` - executable local proof of inventory GET, order POST, command emission, worker consumption, and ticket output.
+- `tests/test_http_order_flow.py` - inherited HTTP order behavior proof.
+- `tests/test_lambda_inventory.py` - inherited Lambda order contract proof.
+- `tests/test_pick_ticket_worker.py` - inherited worker/idempotency proof.
+- `tests/test_sqs_consumer.py` - inherited queue-consumer proof.
+- `tests/test_web_app.js` - inherited browser-contract safety check.
+- `src/http_server.py` - local HTTP server reused for the browser/HTTP boundary.
+- `src/lambda_inventory.py` - order handler reused for the Lambda/database/SQS/EventBridge boundary.
+- `src/pick_ticket_worker.py` - pick-ticket worker reused for the queue-to-file boundary.
+- `src/sqs_consumer.py` - queue consumer helper reused by the worker.
+- `src/web/index.html` - browser UI for the inventory/order workflow.
+- `src/web/app.js` - browser logic that submits the order and refreshes inventory.
+- `deploy/pick-ticket-worker/README.md` - worker operations guide for the long-running queue consumer.
 ## Run the lesson
 From this folder:
 ```bash
-python3 -m unittest discover -s tests
-node --test tests/test_web_app.js
-python3 src/demo_trace.py --order-file data/order-example.json
-./deploy/demo/run-callback-demo.sh
+PYTHONPATH=src python3 -m unittest discover -s tests -v
 ```
-
-For the full instructor callback demo, open two terminals.
-
-Terminal 1: watch the Linux file callback:
-```bash
-rm -f pick-tickets.txt
-: > pick-tickets.txt
-tail -f pick-tickets.txt
-```
-
-Terminal 2: run the worker locally once with the known example message, then inspect the trace artifacts:
-```bash
-python3 src/demo_trace.py --order-file data/order-example.json
-python3 src/pick_ticket_worker.py --once --message-file data/pick-work-message-example.json --output pick-tickets.txt
-cat pick-tickets.txt
-```
-
-If you have the cloud pieces deployed already, use the detailed runbook in `docs/demo-runbook.md` to drive the full browser → API Gateway → Lambda → RDS → SQS/EventBridge → worker path.
 
 ## Run tests
 ```bash
-python3 -m unittest discover -s tests
+PYTHONPATH=src python3 -m unittest discover -s tests -v
 node --test tests/test_web_app.js
 ```
 
 ## Student exercises
-1. Edit `data/order-example.json` to request a different SKU and re-run `python3 src/demo_trace.py --order-file data/order-example.json` to see how the downstream pick-work and event JSON change.
-2. Add one more visible field to the trace output in `src/demo_trace.py` such as the expected `/orders` URL, then extend `tests/test_demo_trace.py` and re-run the test suite.
-
+1. Change the quantity in the temporary order payload used by `tests/test_callback_integration.py`, then run the proof again and observe the changed quantity in the HTTP response and the resulting pick ticket line.
+2. Edit the ticket formatting in `src/pick_ticket_worker.py`, observe the changed behavior through the lesson's visible interface, then optionally run the tests.test_callback_integration -v`, and compare the command JSON, worker output, and ticket file contents.
 ## Continuity note
-- Inherited contract: `GET /inventory`, `POST /orders`, the SQS `PickWorkRequested` command, the EventBridge `OrderPlaced` event, and the worker-generated `pick-tickets.txt` artifact all remain valid
-- Boundary changed in this stage: no core contract changed; this stage adds instructor-facing demo artifacts that make the complete callback path and its JSON boundaries easier to observe live
+- Inherited contract: the inventory JSON, order JSON, pick-work command, `OrderPlaced` event, and pick-ticket output contracts remain valid.
+- Boundary changed in this stage: the course now emphasizes the full browser-to-worker callback chain and a concrete local proof that exercises the real HTTP server, real order handler, and real worker logic with fake AWS clients at the cloud boundaries.
+
+## Component assembly update
+- Added: `tests/test_callback_integration.py` and `docs/end-to-end.md` as the new callback proof and walkthrough artifacts.
+- Reused unchanged: `data/inventory.json`, `data/inventory.schema.json`, `data/orders.schema.json`, `data/pick-work.json`, `data/schema.sql`, `data/seed.sql`, `data/init_db.py`, `src/http_server.py`, `src/lambda_inventory.py`, `src/pick_ticket_worker.py`, `src/sqs_consumer.py`, `src/web/index.html`, `src/web/app.js`, `src/web/style.css`, `deploy/pick-ticket-worker/README.md`, `tests/test_http_order_flow.py`, `tests/test_lambda_inventory.py`, `tests/test_pick_ticket_worker.py`, `tests/test_sqs_consumer.py`, and `tests/test_web_app.js`.
+- Replaced/evolved: none in this stage; the lesson assembles earlier components into a single visible path and adds a proof that uses them together.
 
 ## Cleanup
-Local demo commands create or append `pick-tickets.txt`, which you can remove with:
-```bash
-rm -f pick-tickets.txt
-```
-If you use already-deployed AWS resources for the full cloud walkthrough, clean them up with the same CloudFormation delete commands from the earlier SQS, EventBridge, Lambda/API Gateway, and RDS lessons after class.
+No external resources are created in this stage. If you start the local HTTP server or worker manually, stop those processes when you are done.

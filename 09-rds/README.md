@@ -1,40 +1,64 @@
 # TinyWMS lesson: 09-rds
 
 ## Stage purpose
-This stage adds an Amazon RDS deployment path for the relational TinyWMS database while keeping the same schema and the same JSON-to-table meaning from the previous lesson. Students can compare self-managed Linux database operations with managed AWS database operations and see what responsibilities moved to AWS.
+This stage keeps the Stage 8 relational inventory lesson intact and adds a managed Amazon RDS deployment option for the PostgreSQL path. Students can now compare a self-managed Linux database with AWS-managed RDS while the local SQLite classroom path remains available.
 
 ## Files in this lesson
-- `data/schema.sql` - unchanged logical schema for products and inventory locations
-- `data/seed.sql` - sample seed data that still matches the JSON inventory contract
-- `data/load_from_json.py` - converts the JSON inventory sample into SQL seed statements
-- `deploy/rds/parameters.example.json` - sample CloudFormation parameters showing which values students must supply
-- `deploy/rds/template.json` - minimal RDS deployment template for the existing relational database
-- `deploy/rds/bootstrap.sql` - database initialization SQL used after the RDS instance is available
-- `deploy/rds/connect.sh` - helper showing how to connect to the RDS endpoint from a Linux shell
-- `docs/architecture.md` - compares self-managed Linux DB versus managed RDS and explains the boundary shift
-- `docs/data-contracts.md` - keeps the JSON-to-relational mapping explicit
-- `tests/test_rds_template.py` - checks that the deployment template still references the relational schema conceptually
+- `data/init_db.py` - inherited module-form initializer that still creates the relational schema and loads seed data.
+- `data/inventory.json` - inherited canonical inventory sample that still defines the inventory contract.
+- `data/inventory.schema.json` - inherited JSON Schema for the inventory contract.
+- `data/schema.sql` - inherited inventory table definition with `bin_location` as the canonical relational column.
+- `data/seed.sql` - inherited seed rows derived from the inventory JSON sample.
+- `deploy/rds/README.md` - new operator guide for deploying and verifying the RDS lesson.
+- `docs/architecture.md` - updated component map showing the managed RDS hosting boundary.
+- `docs/data-contracts.md` - updated contract notes comparing SQLite, PostgreSQL, and RDS responsibilities.
+- `infra/rds.yaml` - new CloudFormation template for the lesson-scale RDS deployment.
+- `src/db_adapter.py` - inherited narrow SQLite/PostgreSQL teaching adapter.
+- `src/http_server.py` - inherited transparent HTTP server that still serves `/inventory` from the same contract.
+- `src/inventory_cli.py` - inherited CLI for listing and finding inventory.
+- `src/inventory_watcher.py` - inherited long-running file/process watcher.
+- `src/linux_visible.py` - inherited Linux visibility helper.
+- `src/lambda_inventory.py` - inherited Lambda inventory handler.
+- `src/sql_export.py` - inherited JSON-to-SQL export helper.
+- `src/web/app.js` - inherited browser client that fetches `GET /inventory`.
+- `src/web/index.html` - inherited browser page.
+- `src/web/style.css` - inherited browser styling.
+- `tests/test_http_server.py` - inherited HTTP contract tests.
+- `tests/test_inventory_cli.py` - inherited CLI contract tests.
+- `tests/test_inventory_watcher.py` - inherited watcher tests.
+- `tests/test_linux_visible.py` - inherited Linux visibility tests.
+- `tests/test_lambda_inventory.py` - inherited Lambda inventory tests.
+- `tests/test_relational_persistence.py` - inherited relational persistence tests for schema, seed, adapter, and SQLite bootstrap.
+- `tests/test_web_app.js` - inherited Node safety check for the browser contract.
 
 ## Run the lesson
 From this folder:
 ```bash
-python3 data/load_from_json.py data/inventory.json
-python3 -m json.tool deploy/rds/parameters.example.json
+PYTHONPATH=src python3 -m unittest discover -s tests -v
+python3 -m data.init_db
 ```
-To inspect the RDS deployment artifacts, open `deploy/rds/template.json` and `deploy/rds/bootstrap.sql` in an editor. The template is meant to be read before it is ever deployed.
 
 ## Run tests
 ```bash
-python3 -m unittest discover -s tests
+PYTHONPATH=src python3 -m unittest discover -s tests -v
+node --test tests/test_web_app.js
 ```
 
 ## Student exercises
-1. Change one product description in `data/inventory.json`, regenerate the SQL seed output, and confirm the relational schema still does not need to change.
-2. Edit `deploy/rds/parameters.example.json` to model a different DB instance class, then explain in `docs/architecture.md` which responsibility changed and which did not.
-
+1. Read `deploy/rds/README.md`, then compare the RDS parameter names with the `DatabaseEndpoint` and `DatabasePort` environment variables already used by the later Lambda path in the course.
+2. Edit `data/seed.sql` to change one quantity, rerun `TINYWMS_DB=sqlite TINYWMS_SQLITE_PATH=data/tinywms.db python3 -m data.init_db`, and query the resulting SQLite database to see the updated row before comparing that same schema to the RDS template.
 ## Continuity note
-- Inherited contract: the inventory JSON document and the relational schema meaning from stage 8 remain the same
-- Boundary changed in this stage: the relational database can now be deployed as Amazon RDS instead of only on a self-managed Linux host
+- Inherited contract: the inventory JSON file, schema, CLI, Linux-visible tools, HTTP `/inventory` response, browser inventory page, EC2 deployment wrapper, Lambda inventory handler, and relational schema/initializer remain valid.
+- Boundary changed in this stage: the lesson adds managed RDS as the PostgreSQL hosting option and makes the operational difference between self-managed Linux database handling and AWS-managed database operations visible.
+
+## Component assembly update
+- Added: `infra/rds.yaml` and `deploy/rds/README.md` as the new RDS deployment wrapper for the relational lesson.
+- Reused unchanged: `data/init_db.py`, `data/schema.sql`, `data/seed.sql`, `src/db_adapter.py`, `src/http_server.py`, `src/inventory_cli.py`, `src/inventory_watcher.py`, `src/linux_visible.py`, `src/lambda_inventory.py`, `src/sql_export.py`, `src/web/index.html`, `src/web/app.js`, `src/web/style.css`, `tests/test_http_server.py`, `tests/test_inventory_cli.py`, `tests/test_inventory_watcher.py`, `tests/test_linux_visible.py`, `tests/test_lambda_inventory.py`, `tests/test_relational_persistence.py`, and `tests/test_web_app.js`.
+- Replaced/evolved: `README.md`, `docs/architecture.md`, and `docs/data-contracts.md` now document the managed RDS boundary, including how the same SQL schema is hosted differently without changing the inventory contract.
 
 ## Cleanup
-No AWS resources are created just by reading or testing this repository. If you deploy the template to AWS, delete the RDS instance, any subnet group, security group, and any stack resources you created to avoid ongoing charges.
+Destroy the RDS stack when you are done:
+```bash
+aws cloudformation delete-stack --stack-name tinywms-rds
+```
+If you created a local SQLite database for practice, delete `data/tinywms.db` as well.

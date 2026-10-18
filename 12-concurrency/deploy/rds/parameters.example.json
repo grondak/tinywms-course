@@ -1,8 +1,0 @@
-{
-  "DatabaseName": "tinywms",
-  "MasterUsername": "tinywms_admin",
-  "MasterPassword": "replace-me-before-deploying",
-  "DBInstanceClass": "db.t3.micro",
-  "VPCSecurityGroupId": "sg-0123456789abcdef0",
-  "SubnetIds": "subnet-11111111,subnet-22222222"
-}

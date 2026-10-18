@@ -1,158 +1,113 @@
-# TinyWMS architecture
+# TinyWMS Architecture
 
 ## Current architecture
-- TinyWMS still has a Lambda inventory path that reads from Amazon RDS and returns the established inventory JSON contract.
-- TinyWMS still accepts `POST /orders` through Lambda and API Gateway.
-- The order path still commits inventory and order rows transactionally before reporting success.
-- After a successful committed order, TinyWMS still publishes a JSON pick-work command message to Amazon SQS.
-- After that same successful committed order, TinyWMS still also publishes a separate `OrderPlaced` domain event to Amazon EventBridge.
-- The HTTP request still should not perform pick-ticket generation synchronously. Downstream work still happens later in separate consumers.
-- The SQS consumer has already evolved into a long-lived pick-ticket worker that turns queue JSON into a human-readable Linux text file.
-- The worker may still run directly on a Raspberry Pi, EC2 Linux, or in a container, and that continuity remains important in this stage.
-- The reproducible AWS deployment using CloudFormation remains the current cloud-side deployment path.
-- This stage adds a final architecture walkthrough document that traces one order through every current component and compares the cloud path back to earlier Raspberry Pi and Linux concepts.
-
-## Deployment variants
-### Raspberry Pi Linux
-- The Pi variant still demonstrates a visible Linux process serving JSON directly.
-- It remains useful as the simplest place to compare request, response, files, process, and port behavior.
-- In the current architecture, a Raspberry Pi can also still participate as the downstream pick-ticket worker.
-- The Pi worker reads the same `PickWorkRequested` JSON from SQS and appends the same human-readable tickets to a local `pick-tickets.txt` file.
-- This is important teaching continuity: cloud order placement can still end on a physical Linux machine that students can inspect with `tail -f`.
-- The final walkthrough in `docs/end-to-end.md` explicitly relates this worker path back to Linux ideas students first saw on the Pi.
-
-### EC2 Linux
-- EC2 still runs the same HTTP application with the same `/inventory` response contract in the older deployment path.
-- The student still manages the instance, process, and port in that variant.
-- EC2 or another Linux machine can also run the long-lived pick-ticket worker process against the SQS queue.
-- Students can compare host-managed Linux operation with Lambda-managed execution while keeping the same JSON boundaries visible.
-
-### Browser client
-- The browser still expects the same inventory JSON and renders SKU, description, bin, and quantity.
-- The browser still contains a plain HTML order form that builds an order JSON request and sends it to `/orders`.
-- Failures should stay visible to students as HTTP status codes and JSON error bodies.
-- The browser remains the starting point for the callback demo runbook.
-- This stage does not change the browser’s data model or runtime behavior.
-
-### CloudFormation-managed AWS deployment
-- The single CloudFormation template still defines the current cloud-side TinyWMS architecture.
-- The template still creates a small VPC, private subnets, security groups, a PostgreSQL RDS instance, an SQS queue, an EventBridge bus, IAM permissions, the Lambda function, API Gateway routes, and log retention.
-- Lambda packaging is still intentionally visible through a small Python zip script and an S3 artifact bucket rather than hidden behind a large framework.
-- Stack parameters still keep account-specific values and secrets out of the repository.
-- Stack outputs still expose the API base URL, queue URL, event bus name, and database endpoint so students can inspect the exact cloud boundaries.
-
-### Lambda reading and writing RDS
-- Lambda still handles both `GET /inventory` and `POST /orders`.
-- For `GET /inventory`, Lambda connects to RDS, reads relational rows, and converts them into the established inventory JSON contract.
-- For `POST /orders`, Lambda validates the request, starts a database transaction, inserts into `orders`, attempts conditional inventory decrements, inserts `order_lines`, and commits only if all lines can be satisfied.
-- After the commit succeeds, Lambda builds a pick-work JSON command and sends it to SQS.
-- After the commit succeeds, Lambda also builds an `OrderPlaced` domain event and sends it to EventBridge.
-- The final walkthrough documents these steps one by one, including possible failure points and who operates each boundary.
-
-### RDS
-- RDS continues to host the same `products`, `inventory_locations`, `orders`, and `order_lines` tables.
-- RDS remains the source of truth both for inventory reads and for committed order history.
-- This stage does not change the logical relational schema.
-- A separate bootstrap step still applies SQL visibly after the database instance exists.
-- Students should notice that infrastructure creation and schema creation are separate operational steps.
-
-### SQS command path
-- SQS remains the boundary between order placement and later pick processing.
-- The queue stores one JSON `PickWorkRequested` command message per committed order.
-- That message means a downstream worker is being asked to do a particular task.
-- The worker still uses the command plus a product/bin lookup to build a human-readable pick ticket.
-- The queue still supports Linux-hosted or Raspberry-Pi-hosted workers outside AWS-managed compute.
-
-### Pick-ticket worker on a Linux host or Raspberry Pi
-- The pick-ticket worker is still a small Python Linux process that can run once for a local example or continuously against SQS.
-- For each `PickWorkRequested` message, it formats a readable ticket containing order ID, SKU, description, quantity, and bin location.
-- It appends each completed ticket to `pick-tickets.txt` instead of printing only raw JSON.
-- The worker still logs what it is doing to stdout/stderr so students can inspect it with normal Linux tools.
-- In this stage, the worker is intentionally not moved into Lambda. Keeping the Pi/Linux worker path alive preserves the semester’s conceptual history.
-- The final walkthrough highlights that the same Linux ideas from early lessons still matter here: process lifetime, environment variables, files, permissions, logs, and signals.
-
-### Pick-ticket worker in a container
-- The worker container from the previous stage remains valid.
-- Students may still run the containerized worker against the deployed SQS queue by supplying `AWS_REGION`, `TINYWMS_SQS_QUEUE_URL`, and a mounted output path.
-- Containerization remains a packaging choice for the Linux worker, not a contract change.
-
-### EventBridge event path
-- EventBridge is still a second asynchronous boundary after order placement.
-- It carries a JSON `OrderPlaced` domain event describing something that already happened.
-- The event remains intentionally separate from the SQS command so students can compare imperative and descriptive messaging.
-- Reproducible EventBridge bus creation and visible rules still show where independent consumers could attach.
-
-### Observability
-- API Gateway stage metrics and request logging remain enabled in the reproducible deployment.
-- Lambda logs still go to a named CloudWatch log group with an explicit retention period.
-- Students should be able to answer where to look when `GET /inventory` or `POST /orders` fails in the cloud path.
-- The Linux worker remains observable separately through stdout/stderr and the appended `pick-tickets.txt` file.
-- The final walkthrough collects these failure and observation points into a single end-to-end trace.
-
-## Final walkthrough view of the architecture
-- `docs/end-to-end.md` is now the best single-document guide to the complete final TinyWMS system.
-- It follows one order from browser form input to the final appended pick ticket.
-- At each hop it names the executing code, compute environment, input JSON, output JSON, network boundary, persistent state, likely failures, and responsible operator or provider.
-- It also includes Mermaid diagrams that GitHub can render directly.
-- The walkthrough is intentionally not AWS marketing material; it keeps bringing the system back to concrete computing ideas students already know from Linux and Raspberry Pi lessons.
-
-## Git milestone view of the architecture
-- This repository now explicitly treats Git history as a teaching tool.
-- A student checking out an earlier milestone should see the smaller architecture that existed at that point in the semester.
-- The JSON CLI milestone should not already include Lambda, RDS, SQS, EventBridge, Docker, and CloudFormation files pretending they existed from the start.
-- The Pi HTTP milestone should show a visible Linux HTTP server before students move on to EC2 and Lambda variants.
-- The browser milestone should still consume the same visible inventory JSON contract.
-- The database milestones should show the transition from JSON files to relational tables and then from a self-managed Linux database to RDS.
-- The queue/event milestones should show asynchronous command and event boundaries appearing after transactional order creation, not before.
-- The worker and container milestones should show the Linux process first and the container packaging later.
-- The milestone map in `docs/git-milestones.md` is now part of how students navigate the architecture history.
-
-## What stayed the same
-- The inventory JSON field names and meanings stayed the same.
-- `GET /inventory` remains compatible with the browser and previous tests.
-- The order request and response JSON shapes stayed the same.
-- The relational table meanings stayed the same.
-- The existing SQS pick-work command contract stayed available.
-- The existing EventBridge `OrderPlaced` contract stayed available.
-- The browser inventory table and order form do not need a data-model change.
-- The worker still writes the same human-readable pick-ticket text format.
-- A Raspberry Pi or Linux host is still a supported deployment target for the pick-ticket worker.
-- The current runnable code remains unchanged in this stage.
-
-## What changed in this stage
-- The repository now includes a final end-to-end walkthrough document for the current architecture.
-- Students can review one order path across all current components without stitching the story together from many earlier lessons.
-- The architecture documentation now explicitly points students to that walkthrough when they need the complete final-system view.
-- This stage does not add a new runtime component or cloud service. It adds a teaching document that integrates the existing ones.
-
-## Failure and recovery notes
-- If a student is unsure where a failure happened in the final architecture, start with `docs/end-to-end.md` and identify the last boundary that succeeded.
-- If browser requests fail, verify the configured base URL and HTTP response first.
-- If API Gateway or Lambda fails, inspect CloudWatch logs and the visible proxy event shape.
-- If RDS work fails, check database connectivity, credentials, and schema bootstrap state.
-- If the order commits but no ticket appears, inspect SQS queue state, worker stdout/stderr, and file permissions on `pick-tickets.txt`.
-- If students want to simplify the system again, use the documented Git milestones to step back to an earlier stage rather than trying to mentally subtract features from the final deployment.
-- This stage should not require cloud redeployment because it changes documentation and teaching workflow, not runtime behavior.
+Stage 19 keeps the Stage 18 cloud system intact and adds the teaching idea of repository history as a first-class lesson artifact. The application contracts are still the same, but students can now line up stages, tags, and checkouts to see how the system evolved over time.
 
 ## Architecture History
 - Stage 0: repository scaffold only.
-- Stage 1: JSON inventory contract and CLI reader.
-- Stage 2: Linux-visible command-line examples.
-- Stage 3: Raspberry Pi / EC2-style HTTP server added.
-- Stage 4: browser client added.
-- Stage 5: EC2 deployment scripts and documentation added without changing the app contract.
-- Stage 6: Lambda implementation added alongside the existing Linux server path.
-- Stage 7: API Gateway added in front of Lambda without changing the inventory contract.
-- Stage 8: relational schema and JSON-to-table mapping added while preserving the existing inventory contract.
-- Stage 9: Amazon RDS added as a managed deployment option for the same relational schema.
-- Stage 10: Lambda reads inventory from RDS and maps rows back into the unchanged inventory JSON contract.
-- Stage 11: Lambda also accepts orders, writes `orders` and `order_lines`, decrements inventory transactionally, and rolls back cleanly on insufficient stock.
-- Stage 12: a concurrency demo exposes the naive oversell race, and the order SQL changes to a conditional decrement strategy that preserves the same API contract under concurrent load.
-- Stage 13: after a successful committed order, Lambda publishes a JSON pick-work command to SQS and a separate Python consumer can receive, print, retry, and acknowledge that asynchronous work.
-- Stage 14: after a successful committed order, Lambda also publishes a versioned `OrderPlaced` domain event to EventBridge, and independent consumers can react to that event without being directly coupled to the order handler.
-- Stage 15: the SQS consumer evolves into a long-lived pick-ticket worker that turns `PickWorkRequested` JSON into human-readable warehouse tickets appended to a Linux text file.
-- Stage 16: instructor demo artifacts are added so students can trace the complete callback path from browser request to Linux file append and inspect the JSON at each boundary.
-- Stage 17: the pick-ticket worker is packaged into a simple Docker image so students can compare the same Linux process running directly on a host versus inside a container.
-- Stage 18: the cloud-side architecture is made reproducibly deployable with CloudFormation, while the Raspberry Pi/Linux worker remains a supported participant in the system.
-- Stage 19: documented Git milestones are added so students can check out those earlier architectural moments directly and verify what the system looked like at each step.
-- Stage 20: a final end-to-end walkthrough document is added so students can trace one order across the full current system and relate each cloud boundary back to visible Linux and JSON concepts.
+- Stage 1: inventory JSON contract and CLI backbone.
+- Stage 2: Linux-visible command-line tools and watcher process.
+- Stage 3: tiny HTTP inventory server on Raspberry Pi Linux / EC2 Linux.
+- Stage 4: plain browser HTML/CSS/JavaScript page consuming the same inventory contract.
+- Stage 5: EC2 deployment wrapper for the existing HTTP inventory server.
+- Stage 6: Lambda inventory handler added in parallel with the Pi/EC2 HTTP path.
+- Stage 7: API Gateway front door added in front of the Lambda path while preserving the earlier compute paths.
+- Stage 8: relational persistence lesson adds SQL schema, seed, and export artifacts derived from the JSON inventory contract.
+- Stage 9: managed RDS deployment wrapper shifts the database hosting/operations responsibility from self-managed Linux to AWS RDS while preserving the relational schema.
+- Stage 10: Lambda inventory handler switches its deployed read path from static JSON to RDS while keeping the inventory JSON contract unchanged.
+- Stage 11: order transaction workflow is added to the local HTTP server, browser page, and Lambda handler.
+- Stage 12: concurrent order attempts are hardened so the order transaction cannot oversell inventory under overlap.
+- Stage 13: committed orders now publish asynchronous pick-work commands to SQS, and a reusable consumer helper demonstrates the receive/delete contract.
+- Stage 14: committed orders now also publish OrderPlaced domain events to EventBridge, and two independent consumers show decoupled event delivery.
+- Stage 15: the SQS consumer becomes a durable pick-ticket worker that writes tickets to a file and remembers processed commands across restarts.
+- Stage 16: the callback demo ties the browser, HTTP server, Lambda, queue, worker, and file output together in one local proof.
+- Stage 17: the pick-ticket worker gains a Docker container runtime while keeping the same queue command and ticket output contract.
+- Stage 18: the AWS deployment path is consolidated into one CloudFormation stack with explicit packaging, IAM, queue, event, API, and logging resources.
+- Stage 19: Git tags and checkouts become a teaching boundary so students can compare the semester's simpler and more complex checkpoints side by side.
+- Stage 20: the browser and local HTTP server are repaired so one plain page can render inventory, submit visible order JSON, show the response, and refresh inventory after acceptance while preserving the deployed Lambda/RDS transaction path and JSON contracts.
+
+## Component Assembly Map
+
+| component name | stage introduced | runtime location | inbound contract | outbound contract | dependencies |
+| --- | --- | --- | --- | --- | --- |
+| Inventory JSON file | 01-json-backbone | `data/inventory.json` on disk | inventory JSON contract | inventory JSON contract | none |
+| Inventory CLI | 01-json-backbone | Python process on Linux | inventory JSON contract | visible JSON text / inventory listing | Inventory JSON file |
+| Linux-visible demo CLI | 02-linux-visible | Python process on Linux | command name plus stdin/stdout/stderr/env/process contract | visible output, non-zero exit codes, environment echo | Python runtime, environment variables |
+| Inventory watcher | 02-linux-visible | long-running Python process on Linux | inventory JSON contract and log-file path | appended log snapshots | Inventory JSON file |
+| HTTP inventory server | 03-pi-http-server | Python process on a TCP port on Raspberry Pi Linux or EC2 Linux | HTTP `GET /inventory` | inventory JSON body with HTTP status and headers | Inventory JSON file, Python standard library HTTP server |
+| Browser inventory page | 04-browser | browser DOM and JavaScript | HTTP `GET /inventory` response body | rendered table and visible error message | HTTP inventory server, Inventory JSON file |
+| EC2 deployment wrapper | 05-ec2-deployment | EC2 Linux host process startup scripts | shell environment plus repository layout | launched HTTP inventory server process | HTTP inventory server, shell, copied environment file |
+| Lambda inventory handler | 06-lambda | AWS Lambda | Lambda event for `GET /inventory` and an injected database/connection-like interface in tests | inventory JSON body with HTTP-style status, headers, and body | Inventory JSON file, AWS Lambda runtime, IAM role |
+| API Gateway front door | 07-api-gateway | AWS API Gateway | HTTPS `GET /inventory` | proxied Lambda invocation and HTTP response | Lambda inventory handler, AWS Lambda invoke permission |
+| Relational persistence | 08-relational-persistence | Linux database process | SQL schema and seed derived from the inventory JSON contract | inventory rows stored in tables and SQL INSERT output from the export script | Inventory JSON file, SQL schema, SQL export script |
+| RDS deployment wrapper | 09-rds | AWS RDS | deployment parameters for database name, credentials, subnets, and security groups | running managed PostgreSQL instance with endpoint/port outputs | Relational persistence, AWS RDS, VPC subnet/security-group inputs |
+| Lambda database-backed inventory handler | 10-lambda-rds | AWS Lambda | `GET /inventory` Lambda event plus PostgreSQL connection settings | inventory JSON body returned from database rows | Lambda inventory handler, relational persistence, RDS wrapper |
+| local HTTP inventory/order server | 11-orders | Python process on Linux | HTTP `GET /inventory` and `POST /orders` | inventory JSON plus order acceptance/rejection JSON | HTTP inventory server, inventory JSON, order JSON |
+| integrated inventory and order browser page | 11-orders | browser | inventory JSON plus order JSON via same-origin fetch | rendered inventory table, order request JSON, response JSON, and refresh behavior | browser inventory page, local HTTP inventory/order server |
+| Lambda order handler | 11-orders | AWS Lambda | HTTP `GET /inventory` and `POST /orders` events plus PostgreSQL connection settings | inventory JSON, accepted-order JSON, and transaction rollback on rejection | Lambda database-backed inventory handler, relational persistence, order JSON |
+| concurrent order hardening | 12-concurrency | database transaction boundary | overlapping order attempts using the same order JSON contract | committed inventory changes without overselling and visible rollback on rejection | Lambda order handler, relational persistence, order JSON |
+| SQS consumer helper | 13-sqs | Python process on Linux | pick-work command JSON from a queue message body | decoded command JSON passed to a callback; delete-on-success queue acknowledgement | SQS client, pick-work command contract |
+| pick-work SQS queue | 13-sqs | AWS SQS | pick-work command JSON | stored queue messages and delivery metadata | Lambda order handler, pick-work command contract |
+| OrderPlaced event consumers | 14-domain-events | Python processes on Linux | EventBridge-delivered OrderPlaced event JSON from separate target queues | visible event inspection and acknowledgement after queue receive/delete | EventBridge rule targets, SQS queues, OrderPlaced event contract |
+| EventBridge order bus and rules | 14-domain-events | AWS EventBridge | OrderPlaced event JSON | fan-out to two independent SQS target queues | Lambda order handler, SQS target queues, queue policies |
+| pick-ticket worker | 15-pick-ticket-worker | Python process on Linux | pick-work command JSON from `src.sqs_consumer.consume_messages(...)` | durable `pick-tickets.txt` file entries and persisted command IDs | SQS consumer helper, pick-work command contract, filesystem |
+| callback integration proof | 16-callback-demo | local test suite | browser request/response, Lambda order command/event emission, queue receipt, and worker callback JSON | end-to-end local proof and pick-ticket file output | HTTP server, Lambda handler, worker, SQS consumer helper |
+| containerized pick-ticket worker | 17-container-worker | Docker container | pick-work command JSON from `src.sqs_consumer.consume_messages(...)` or the worker CLI entrypoint | the same durable `pick-tickets.txt` output and persisted command IDs as the bare process | pick-ticket worker, SQS consumer helper, mounted state volume |
+| consolidated AWS deployment | 18-aws-deployment | AWS CloudFormation stack | inventory/order HTTP requests, Lambda env vars, pick-work queue path, OrderPlaced event path, and RDS connectivity inputs | API base URL, function name, queue URL/ARN, bus name/ARN, DB endpoint/port outputs | Lambda inventory handler, API Gateway front door, pick-work SQS queue, EventBridge order bus and rules, RDS connectivity, logs/observability |
+| Git history milestones | 19-git-history | git tags and checkouts | the lesson repository state at each milestone | readable historical checkpoints and comparison points | current repository history, stage tags, deployment guides, and existing lesson artifacts |
+| final browser and local order HTTP path | 20-final-walkthrough | browser DOM and Python standard-library HTTP server | same-origin or runtime-overridden `/inventory` and `/orders` requests plus local inventory file state | rendered table, visible order JSON, accepted/rejected JSON response, and refreshed inventory display | `src/web/index.html`, `src/web/app.js`, `src/web/style.css`, `src/http_server.py`, inventory file override, existing Lambda/RDS contracts |
+
+## Component evolution notes
+- The inventory JSON contract remains canonical and compatible with all earlier readers.
+- Stage 11 introduces `order-json` as a new visible contract; it remains small and separate from the inventory schema.
+- Stage 12 does not add a new top-level subsystem. It hardens the existing order/database path so the same contracts survive genuine overlap.
+- Stage 13 adds a queue boundary after the commit. The new queue contract is separate from the existing inventory/order HTTP contracts.
+- Stage 14 adds a domain event boundary after the same commit. The event contract says what happened, while the SQS command says what to do.
+- Stage 15 reuses the Stage 13 consumer boundary rather than replacing it. The worker evolves the consumer into a durable process that writes file output and remembers processed command IDs.
+- Stage 16 adds a local callback proof that traces the whole path without changing the contracts.
+- Stage 17 does not change the queue or file contract. It adds an alternate container runtime for the same worker process.
+- Stage 18 consolidates deployment artifacts. It does not change the application contract; it makes the assembled cloud path reproducible and inspectable from one stack.
+- Stage 19 does not replace any application boundary. It adds Git milestones so students can compare earlier repository snapshots against the current architecture and deployment guides.
+- Stage 20 repairs the local browser and HTTP server path without replacing the deployed Lambda/RDS order transaction path.
+- `src/http_server.py` remains the local teaching server that serves browser files and implements `POST /orders`.
+- `src/lambda_inventory.py` remains the order handler entry point. Its transaction strategy remains the lesson-visible boundary that publishes asynchronous queue commands and domain events after the commit.
+- The queue consumer helper and the event consumers intentionally expose receive/delete behavior instead of hiding it behind a worker loop so later stages can evolve them into long-running services.
+- `src/pick_ticket_worker.py` is the first component in TinyWMS that turns a queue message into a durable operational artifact on disk, and Stage 17 packages that same process in Docker without changing the behavior.
+- `src/Dockerfile` is the containerized runtime wrapper for the worker, not a new business-logic component.
+- `infra/template.yaml` is the stage 18 deployment assembly point; it groups the previously separate cloud operations into one stack without altering the business contracts.
+- SQLite is useful for portable local exercises, but it cannot demonstrate the PostgreSQL row-lock lesson; Stage 12 concurrency remains a PostgreSQL-only proof of `FOR UPDATE` overlap behavior.
+
+## Component evolution timeline
+This timeline is derived from the Component Assembly Map above.
+
+| stage introduced | components first appearing at that stage | dependency snapshot |
+| --- | --- | --- |
+| 01-json-backbone | Inventory JSON file, Inventory CLI | Inventory file stands alone and feeds the CLI. |
+| 02-linux-visible | Linux-visible demo CLI, Inventory watcher | Linux process visibility depends on the inventory contract and the local filesystem. |
+| 03-pi-http-server | HTTP inventory server | HTTP server depends on the inventory contract. |
+| 04-browser | Browser inventory page | Browser depends on the HTTP inventory server and the same inventory contract. |
+| 05-ec2-deployment | EC2 deployment wrapper | EC2 wrapper depends on the HTTP inventory server and Linux process startup. |
+| 06-lambda | Lambda inventory handler | Lambda compute depends on the inventory contract and a database-like connection. |
+| 07-api-gateway | API Gateway front door | API Gateway depends on Lambda invocation permissions and the Lambda inventory handler. |
+| 08-relational-persistence | Relational persistence | SQL schema and export depend on the inventory JSON contract. |
+| 09-rds | RDS deployment wrapper | RDS wrapper depends on the relational schema and AWS-managed database hosting. |
+| 10-lambda-rds | Lambda database-backed inventory handler | Lambda read path changes from static JSON to the relational database boundary. |
+| 11-orders | Local HTTP inventory/order server, integrated inventory and order browser page, Lambda order handler | Order workflow adds the order JSON contract while reusing the inventory contract. |
+| 12-concurrency | Concurrent order hardening | Transaction boundary hardens the existing order/database path. |
+| 13-sqs | SQS consumer helper, pick-work SQS queue | Queue command boundary is added after committed orders. |
+| 14-domain-events | Event consumers, EventBridge order bus and rules | Event boundary is added alongside the queue boundary with independent consumers. |
+| 15-pick-ticket-worker | Pick-ticket worker | Queue consumer evolves into a durable worker and adds a file output boundary. |
+| 16-callback-demo | Callback integration proof | Local proof composes the browser, HTTP, Lambda, queue, worker, and file output paths. |
+| 17-container-worker | Containerized pick-ticket worker | Docker packages the same worker contract as an alternate runtime. |
+| 18-aws-deployment | Consolidated AWS deployment | One CloudFormation stack assembles the cloud resources around the same contracts. |
+| 19-git-history | Git history milestones | Git tags/checkouts now expose the historical checkpoints of the existing components. |
+| 20-final-walkthrough | final browser and local order HTTP path | Browser and HTTP server now share the same local order flow while preserving the deployed transaction path. |
+
+## Component map continuity checks
+- The inventory JSON contract remains the common root for the earliest CLI, HTTP, browser, and Lambda lessons.
+- The order JSON contract remains the visible request shape for the HTTP and Lambda order paths.
+- The queue command, event, and ticket output contracts remain separate so students can compare imperative commands, facts, and durable file artifacts.
+- The deployment guides stay present so earlier milestones can still be checked out and reproduced at the appropriate checkpoint.
+
+## SQLite concurrency boundary
+SQLite cannot demonstrate the PostgreSQL row-lock lesson; use PostgreSQL and `SELECT ... FOR UPDATE` for the concurrency demonstration.

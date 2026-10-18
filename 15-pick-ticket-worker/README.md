@@ -1,84 +1,46 @@
-# TinyWMS lesson: 15-pick-ticket-worker
+# TinyWMS lesson: 14-domain-events
 
 ## Stage purpose
-This stage turns the earlier SQS message consumer into a pick-ticket worker. Given a `PickWorkRequested` JSON message, the worker produces a human-readable warehouse pick ticket and appends it to `pick-tickets.txt` so students can watch a long-lived Linux process turn queue JSON into a local file.
+This stage separates two ideas that were previously combined: the imperative pick-work command sent to SQS and the factual `OrderPlaced` event sent to EventBridge. Students can compare "do this next" with "this happened" while keeping the existing order transaction, queue command, and inventory contract intact.
 
 ## Files in this lesson
-- `src/pick_ticket_worker.py` - long-running worker that receives SQS messages, prints visible logs to stdout/stderr, formats pick tickets, appends them to a text file, and optionally acknowledges messages
-- `src/pick_ticket.py` - small formatter that converts a pick-work JSON message plus product/bin lookup rows into human-readable pick-ticket text
-- `deploy/sqs/run-pick-ticket-worker.sh` - simple shell wrapper for running the worker as a visible Linux process
-- `deploy/sqs/tinywms-pick-ticket-worker.service` - example systemd unit showing how the same Python worker can run as a restartable Linux service
-- `docs/data-contracts.md` - now documents the human-readable pick-ticket file output created from the existing pick-work command
-- `docs/architecture.md` - explains that the queue consumer has evolved into a file-writing worker process
-- `tests/test_pick_ticket.py` - tests pick-ticket formatting from JSON command data plus inventory lookup rows
-- `tests/test_pick_ticket_worker.py` - tests successful ticket writing, logging, file append behavior, and message acknowledgement wiring
+- `README.md` - lesson guide for the event boundary, consumer demos, and compatibility checks.
+- `docs/architecture.md` - updated component map and stage history showing the new event path beside the existing queue path.
+- `docs/data-contracts.md` - updated contract guide with the `OrderPlaced` event shape and its relation to the queue command.
+- `deploy/events/README.md` - deploy/resolve/verify/destroy commands for the EventBridge lesson.
+- `infra/events.yaml` - CloudFormation template for the event bus, two rules, two queues, and queue policies.
+- `src/event_consumer_a.py` - independent consumer for target queue A.
+- `src/event_consumer_b.py` - independent consumer for target queue B.
+- `src/lambda_inventory.py` - order handler evolved to publish both the SQS pick-work command and the EventBridge `OrderPlaced` event after commit.
+- `tests/test_concurrency.py` - updated concurrency proof that injects both queue and event clients.
+- `tests/test_lambda_inventory.py` - updated order-handler contract tests for both async payloads.
+- `tests/test_event_consumers.py` - local tests for the two independent EventBridge consumers.
+- `tests/test_sqs_consumer.py` - inherited queue consumer tests that still prove receive/delete semantics.
+- `tests/test_web_app.js` - inherited browser-contract safety check.
 
 ## Run the lesson
 From this folder:
 ```bash
-python3 -m unittest discover -s tests
-node --test tests/test_web_app.js
-python3 src/pick_ticket.py data/pick-work-message-example.json
-python3 src/pick_ticket_worker.py --once --message-file data/pick-work-message-example.json --output pick-tickets.txt
-cat pick-tickets.txt
-```
-
-To run the worker as a long-lived Linux process against SQS:
-```bash
-export TINYWMS_SQS_QUEUE_URL=https://sqs.us-east-1.amazonaws.com/123456789012/tinywms-pick-work
-export AWS_REGION=us-east-1
-python3 src/pick_ticket_worker.py --poll-seconds 2 --output pick-tickets.txt
-```
-
-To stop the long-lived worker:
-```bash
-Ctrl+C
-```
-The worker prints a shutdown message before exiting.
-
-To run it through the provided shell wrapper:
-```bash
-export TINYWMS_SQS_QUEUE_URL=https://sqs.us-east-1.amazonaws.com/123456789012/tinywms-pick-work
-./deploy/sqs/run-pick-ticket-worker.sh
-```
-
-To install it as a Linux service on a host such as Raspberry Pi or EC2:
-```bash
-sudo cp deploy/sqs/tinywms-pick-ticket-worker.service /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable tinywms-pick-ticket-worker
-sudo systemctl start tinywms-pick-ticket-worker
-sudo systemctl status tinywms-pick-ticket-worker
-journalctl -u tinywms-pick-ticket-worker -f
+PYTHONPATH=src python3 -m unittest discover -s tests -v
 ```
 
 ## Run tests
 ```bash
-python3 -m unittest discover -s tests
+PYTHONPATH=src python3 -m unittest discover -s tests -v
 node --test tests/test_web_app.js
 ```
 
 ## Student exercises
-1. Change `src/pick_ticket.py` so each line also prints the unit of measure, then update or extend the tests and re-run them.
-2. Modify `src/pick_ticket_worker.py` so stderr logs include a short prefix such as `worker error:` on failed messages, then re-run `tests/test_pick_ticket_worker.py`.
-
+1. Edit the `detail-type` or `source` fields in `src/lambda_inventory.py`, then observe the changed behavior through the lesson's visible interface, then optionally run the tests to observe how the visible JSON event shape changes while the pick-work command stays separate.
+2. Change the filter pattern in `infra/events.yaml` for one rule, redeploy the template, and inspect which queue receives the event first using the AWS CLI or the small Python consumer scripts.
 ## Continuity note
-- Inherited contract: `GET /inventory`, `POST /orders`, the SQS `PickWorkRequested` command, and the EventBridge `OrderPlaced` event all remain valid
-- Boundary changed in this stage: the earlier visible queue consumer is now a worker that performs real downstream work by converting the existing pick-work JSON command into a human-readable Linux file named `pick-tickets.txt`
+- Inherited contract: the inventory JSON contract, order JSON contract, pick-work command contract, HTTP order path, browser order page, SQLite classroom path, and SQS consumer behavior remain valid.
+- Boundary changed in this stage: after commit, the order path now emits a factual EventBridge event in addition to the existing queue command, and the event is fanned out to two independent consumer queues.
+
+## Component assembly update
+- Added: `infra/events.yaml`, `deploy/events/README.md`, `src/event_consumer_a.py`, `src/event_consumer_b.py`, and `tests/test_event_consumers.py` as the new event lesson artifacts.
+- Reused unchanged: `data/inventory.json`, `data/inventory.schema.json`, `data/orders.schema.json`, `data/pick-work.json`, `data/schema.sql`, `data/seed.sql`, `data/init_db.py`, `src/http_server.py`, `src/inventory_cli.py`, `src/inventory_watcher.py`, `src/linux_visible.py`, `src/order_form.html`, `src/sql_export.py`, `src/sqs_consumer.py`, `src/web/index.html`, `src/web/app.js`, `src/web/style.css`, `deploy/ec2/README.md`, `deploy/ec2/environment.example`, `deploy/ec2/run_inventory_server.sh`, `deploy/api-gateway/README.md`, `deploy/lambda/README.md`, `deploy/rds/README.md`, `deploy/sqs/README.md`, `infra/api-gateway.yaml`, `infra/lambda.yaml`, `infra/rds.yaml`, `infra/sqs.yaml`, `tests/test_http_order_flow.py`, `tests/test_http_server.py`, `tests/test_inventory_cli.py`, `tests/test_inventory_watcher.py`, `tests/test_linux_visible.py`, `tests/test_relational_persistence.py`, `tests/test_sqlite_orders.py`, `tests/test_sqs_consumer.py`, and `tests/test_web_app.js`.
+- Replaced/evolved: `src/lambda_inventory.py`, `tests/test_concurrency.py`, and `tests/test_lambda_inventory.py` now publish an `OrderPlaced` event after commit while preserving the SQS command path.
 
 ## Cleanup
-Local tests and local `--message-file` runs only create `pick-tickets.txt`, which you can remove with:
-```bash
-rm -f pick-tickets.txt
-```
-If you installed the Linux service for practice, stop and remove it when finished:
-```bash
-sudo systemctl stop tinywms-pick-ticket-worker
-sudo systemctl disable tinywms-pick-ticket-worker
-sudo rm -f /etc/systemd/system/tinywms-pick-ticket-worker.service
-sudo systemctl daemon-reload
-```
-If you also deployed the SQS stack, delete it when you are done with the lab:
-```bash
-aws cloudformation delete-stack --stack-name tinywms-sqs
-```
+No external resources are created by the Python tests. If you deploy the event lesson, destroy the CloudFormation stack when you are done.

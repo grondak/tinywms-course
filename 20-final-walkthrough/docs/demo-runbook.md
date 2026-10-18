@@ -1,287 +1,417 @@
-# TinyWMS callback demo runbook
+# TinyWMS demo runbook
 
-## Purpose
-Use this runbook when you want students to watch one order travel through the whole TinyWMS system and finally appear as a pick ticket in a Linux text file.
+Run each session from its named stage directory. Commands lead with visible behavior; the listed test is an optional safety check after the demonstration.
 
-The target classroom moment is:
-- one terminal running `tail -f pick-tickets.txt`
-- one browser submitting an order
-- students tracing the intermediate JSON contracts instead of treating the system as a black box
+## Session 1
+**Backing stage:** 01-json-backbone
+**Work type:** Partly manual
 
-## Demo map
-1. Browser builds order request JSON.
-2. Browser sends HTTP `POST /orders`.
-3. API Gateway wraps the HTTP request as a Lambda proxy event JSON document.
-4. Lambda validates the request, writes the RDS transaction, then creates two asynchronous JSON documents:
-   - SQS command: `PickWorkRequested`
-   - EventBridge event: `OrderPlaced`
-5. Python worker reads the SQS command and appends a human-readable ticket to `pick-tickets.txt`.
+Goal: Print and inspect the canonical inventory JSON.
 
-## Files to have open during the demo
-- `src/web/index.html` - browser form fields
-- `src/web/app.js` - browser `fetch()` code and visible JSON request body
-- `src/lambda_inventory.py` - Lambda entry point for `POST /orders`
-- `src/order_service.py` - validation, database write, SQS publish, EventBridge publish
-- `src/pick_work.py` - builds the SQS command JSON
-- `src/domain_events.py` - builds the EventBridge event JSON
-- `src/pick_ticket_worker.py` - Linux worker that writes the file
-- `src/pick_ticket.py` - human-readable pick-ticket formatting
-- `docs/data-contracts.md` - field-by-field contract meanings
-
-## Terminal setup
-Open three terminals if possible.
-
-### Terminal 1: watch the final Linux file
 ```bash
-rm -f pick-tickets.txt
-: > pick-tickets.txt
+python3 src/inventory_cli.py data/inventory.json list
+python3 src/inventory_cli.py data/inventory.json dump
+```
+
+Observe the command output or interface before continuing. Optional safety check: `tests/test_inventory_cli.py`.
+
+Artifact link:
+- `data/inventory.json`
+
+## Session 2
+**Backing stage:** 02-linux-visible
+**Work type:** Partly manual
+
+Goal: Observe environment variables, stdin, stdout, and exit status.
+
+```bash
+python3 src/linux_visible.py env
+TINYWMS_DEMO=visible python3 src/linux_visible.py env
+printf 'hello from stdin\n' | python3 src/linux_visible.py echo
+python3 src/linux_visible.py fail; echo "exit code: $?"
+```
+
+Observe the command output or interface before continuing. Optional safety check: `tests/test_linux_visible.py`.
+
+Artifact link:
+- `src/linux_visible.py`
+
+## Session 3
+**Backing stage:** 02-linux-visible
+**Work type:** Partly manual
+
+Goal: Run a long-lived process and watch its visible output file.
+
+```bash
+python3 src/inventory_watcher.py data/inventory.json /tmp/tinywms-watch.log
+tail -f /tmp/tinywms-watch.log
+```
+
+Observe the command output or interface before continuing. Optional safety check: `tests/test_linux_visible.py`.
+
+Artifact link:
+- `src/inventory_watcher.py`
+
+## Session 4
+**Backing stage:** 03-pi-http-server
+**Work type:** Partly manual
+
+Goal: Cross the first HTTP boundary and inspect response headers and JSON.
+
+```bash
+PYTHONPATH=src python3 src/http_server.py
+curl -i http://127.0.0.1:8000/inventory
+```
+
+Observe the command output or interface before continuing. Optional safety check: `tests/test_http_server.py`.
+
+Artifact link:
+- `src/http_server.py`
+
+## Session 5
+**Backing stage:** 04-browser
+**Work type:** Partly manual
+
+Goal: Render the inventory JSON in a plain browser page.
+
+```bash
+PYTHONPATH=src python3 -m http.server --directory src/web 8081
+# Open http://127.0.0.1:8081/ in a browser.
+```
+
+Observe the command output or interface before continuing. Optional safety check: `tests/test_web_app.js`.
+
+Artifact link:
+- `src/web/index.html`
+
+## Session 6
+**Backing stage:** 05-ec2-deployment
+**Work type:** Manual only
+
+Goal: Identify what moves unchanged from Raspberry Pi Linux to EC2 Linux.
+
+```bash
+sed -n '1,220p' deploy/ec2/README.md
+bash -n deploy/ec2/run_inventory_server.sh
+```
+
+Observe the command output or interface before continuing. Optional safety check: `tests/test_ec2_deployment_files.py`.
+
+Artifact link:
+- `deploy/ec2/README.md`
+
+## Session 7
+**Backing stage:** 06-lambda
+**Work type:** Partly manual
+
+Goal: Invoke the Lambda-shaped inventory boundary and inspect its JSON envelope.
+
+```bash
+PYTHONPATH=. python3 -c "import json; from src.lambda_inventory import handler; print(json.dumps(handler({'queryStringParameters': {'demo': 'local-json'}}, None), indent=2))"
+```
+
+Observe the command output or interface before continuing. Optional safety check: `tests/test_lambda_inventory.py`.
+
+Artifact link:
+- `src/lambda_inventory.py`
+
+## Session 8
+**Backing stage:** 07-api-gateway
+**Work type:** Manual only
+
+Goal: Trace the HTTP route from API Gateway to the Lambda handler.
+
+```bash
+sed -n '1,240p' infra/api-gateway.yaml
+sed -n '1,220p' deploy/api-gateway/README.md
+```
+
+Observe the command output or interface before continuing. Optional safety check: `tests/test_api_gateway_files.py`.
+
+Artifact link:
+- `infra/api-gateway.yaml`
+
+## Session 9
+**Backing stage:** 08-relational-persistence
+**Work type:** Partly manual
+
+Goal: Create the SQLite classroom database from the visible schema and seed.
+
+```bash
+TINYWMS_DB=sqlite TINYWMS_SQLITE_PATH=data/tinywms.db python3 -m data.init_db
+```
+
+Observe the command output or interface before continuing. Optional safety check: `tests/test_relational_persistence.py`.
+
+Artifact link:
+- `data/schema.sql`
+
+## Session 10
+**Backing stage:** 08-relational-persistence
+**Work type:** Partly manual
+
+Goal: Query relational rows and compare them with the JSON records.
+
+```bash
+python3 -c "import sqlite3, json; print(json.dumps(sqlite3.connect('data/tinywms.db').execute('SELECT * FROM inventory ORDER BY sku').fetchall(), indent=2))"
+```
+
+Observe the command output or interface before continuing. Optional safety check: `tests/test_sql_export.py`.
+
+Artifact link:
+- `data/seed.sql`
+
+## Session 11
+**Backing stage:** 09-rds
+**Work type:** Manual only
+
+Goal: Compare self-managed database work with the managed RDS boundary.
+
+```bash
+sed -n '1,260p' deploy/rds/README.md
+sed -n '1,260p' infra/rds.yaml
+```
+
+Observe the command output or interface before continuing. Optional safety check: `tests/test_rds_deployment.py`.
+
+Artifact link:
+- `deploy/rds/README.md`
+
+## Session 12
+**Backing stage:** 10-lambda-rds
+**Work type:** Partly manual
+
+Goal: Follow the Lambda inventory query from JSON response to PostgreSQL rows.
+
+```bash
+sed -n '1,260p' src/lambda_inventory.py
+sed -n '1,220p' docs/data-contracts.md
+```
+
+Observe the command output or interface before continuing. Optional safety check: `tests/test_lambda_inventory.py`.
+
+Artifact link:
+- `tests/test_lambda_inventory.py`
+
+## Session 13
+**Backing stage:** 11-orders
+**Work type:** Partly manual
+
+Goal: Use one browser page to view inventory, submit an order, and see inventory refresh.
+
+```bash
+TINYWMS_DB=sqlite TINYWMS_SQLITE_PATH=data/tinywms.db python3 -m data.init_db
+PYTHONPATH=src python3 src/http_server.py
+# Open the server URL in a browser and submit the visible order JSON.
+```
+
+Observe the command output or interface before continuing. Optional safety check: `tests/test_http_order_flow.py`.
+
+Artifact link:
+- `src/web/index.html`
+
+## Session 14
+**Backing stage:** 11-orders
+**Work type:** Partly manual
+
+Goal: Submit visible order JSON with curl, then observe the changed inventory.
+
+```bash
+curl -s -H 'Content-Type: application/json' -d '{"order_id":"ORD-DEMO","lines":[{"sku":"SKU-1001","quantity":1}]}' http://127.0.0.1:8000/orders
+curl -s http://127.0.0.1:8000/inventory
+```
+
+Observe the command output or interface before continuing. Optional safety check: `tests/test_http_order_flow.py`.
+
+Artifact link:
+- `src/http_server.py`
+
+## Session 15
+**Backing stage:** 12-concurrency
+**Work type:** Partly manual
+
+Goal: Run overlapping order attempts and compare SQLite with PostgreSQL row locking.
+
+```bash
+python3 src/concurrency_demo.py
+```
+
+Observe the command output or interface before continuing. Optional safety check: `tests/test_concurrency.py`.
+
+Artifact link:
+- `tests/test_concurrency.py`
+
+## Session 16
+**Backing stage:** 13-sqs
+**Work type:** Partly manual
+
+Goal: Inspect the per-line pick-work command JSON sent after commit.
+
+```bash
+python3 -m json.tool data/pick-work.json
+sed -n '1,260p' src/sqs_consumer.py
+```
+
+Observe the command output or interface before continuing. Optional safety check: `tests/test_sqs_consumer.py`.
+
+Artifact link:
+- `tests/test_sqs_consumer.py`
+
+## Session 17
+**Backing stage:** 14-domain-events
+**Work type:** Partly manual
+
+Goal: Compare the imperative SQS command with the descriptive OrderPlaced event.
+
+```bash
+sed -n '1,280p' docs/data-contracts.md
+sed -n '1,260p' infra/events.yaml
+```
+
+Observe the command output or interface before continuing. Optional safety check: `tests/test_event_consumers.py`.
+
+Artifact link:
+- `tests/test_event_consumers.py`
+
+## Session 18
+**Backing stage:** 15-pick-ticket-worker
+**Work type:** Manual only
+
+Goal: Run the long-lived worker against a configured queue and watch ticket output.
+
+```bash
+python3 src/pick_ticket_worker.py "$PICK_WORK_QUEUE_URL" pick-tickets.txt --state-file pick-ticket-worker-state.json
 tail -f pick-tickets.txt
 ```
-This terminal should stay visible to the class.
 
-### Terminal 2: show the JSON artifacts used in the path
-```bash
-python3 src/demo_trace.py --order-file data/order-example.json
-```
-This prints:
-- browser order request JSON
-- example Lambda proxy event JSON
-- derived SQS command JSON
-- derived EventBridge event JSON
-- expected pick-ticket text output
+Observe the command output or interface before continuing. Optional safety check: `tests/test_pick_ticket_worker.py`.
 
-### Terminal 3: run or inspect the worker
-Local one-shot continuity demo:
+Artifact link:
+- `tests/test_pick_ticket_worker.py`
+
+## Session 19
+**Backing stage:** 15-pick-ticket-worker
+**Work type:** Manual only
+
+Goal: Operate the worker as a user service and inspect its logs.
+
 ```bash
-python3 src/pick_ticket_worker.py --once --message-file data/pick-work-message-example.json --output pick-tickets.txt
-```
-Long-running worker against a real queue:
-```bash
-export TINYWMS_SQS_QUEUE_URL=https://sqs.us-east-1.amazonaws.com/123456789012/tinywms-pick-work
-export AWS_REGION=us-east-1
-python3 src/pick_ticket_worker.py --poll-seconds 2 --output pick-tickets.txt
+systemctl --user status tinywms-pick-ticket-worker
+journalctl --user -u tinywms-pick-ticket-worker.service -f
 ```
 
-## Local continuity demo
-Use this if cloud resources are not deployed today.
+Observe the command output or interface before continuing. Optional safety check: `tests/test_pick_ticket_worker.py`.
 
-1. Print the visible contracts:
-```bash
-python3 src/demo_trace.py --order-file data/order-example.json
-```
-2. In another terminal, keep watching the file:
-```bash
-tail -f pick-tickets.txt
-```
-3. Append the known example ticket:
-```bash
-python3 src/pick_ticket_worker.py --once --message-file data/pick-work-message-example.json --output pick-tickets.txt
-```
-4. Point out that the final file append is produced from JSON command data, not from hidden in-memory state.
+Artifact link:
+- `deploy/pick-ticket-worker/README.md`
 
-## Full cloud demo
-Use this if API Gateway, Lambda, RDS, EventBridge, and SQS are already deployed from earlier lessons.
+## Session 20
+**Backing stage:** 16-callback-demo
+**Work type:** Partly manual
 
-### 1. Start the worker on a Linux host
-On the machine that will write `pick-tickets.txt`:
-```bash
-export TINYWMS_SQS_QUEUE_URL=https://sqs.us-east-1.amazonaws.com/123456789012/tinywms-pick-work
-export AWS_REGION=us-east-1
-python3 src/pick_ticket_worker.py --poll-seconds 2 --output pick-tickets.txt
-```
-Or use the wrapper:
-```bash
-export TINYWMS_SQS_QUEUE_URL=https://sqs.us-east-1.amazonaws.com/123456789012/tinywms-pick-work
-./deploy/sqs/run-pick-ticket-worker.sh
-```
+Goal: Follow one accepted order across HTTP, queue receipt, worker callback, and ticket file.
 
-### 2. Watch the final callback landing point
-In a second terminal on that same machine:
 ```bash
-rm -f pick-tickets.txt
-: > pick-tickets.txt
+sed -n '1,260p' docs/end-to-end.md
 tail -f pick-tickets.txt
 ```
 
-### 3. Open the browser UI
-If serving the static browser locally:
+Observe the command output or interface before continuing. Optional safety check: `tests/test_callback_integration.py`.
+
+Artifact link:
+- `docs/end-to-end.md`
+
+## Session 21
+**Backing stage:** 17-container-worker
+**Work type:** Partly manual
+
+Goal: Build the same worker code into a container image.
+
 ```bash
-python3 src/http_server.py data/inventory.json
-```
-Then visit:
-- `http://localhost:8000/`
-
-If using the browser against API Gateway, set the browser base URL field to something like:
-- `https://abc123.execute-api.us-east-1.amazonaws.com/prod`
-
-### 4. Show the browser request JSON before clicking submit
-In the page:
-- set customer and SKU fields
-- point at the `JSON request body` box
-- explain that this is the exact JSON contract from `docs/data-contracts.md`
-
-Example request body:
-```json
-{
-  "customer": "Example School Store",
-  "lines": [
-    {
-      "sku": "SKU-1001",
-      "quantity": 1
-    }
-  ]
-}
+docker build -t tinywms-pick-ticket-worker -f src/Dockerfile .
 ```
 
-### 5. Explain the HTTP boundary
-When the browser clicks submit:
-- HTTP method: `POST`
-- path: `/orders`
-- request `Content-Type`: `application/json`
-- response: JSON success or JSON error
+Observe the command output or interface before continuing. Optional safety check: `tests/test_container_worker.py`.
 
-### 6. Show the API Gateway to Lambda event shape
-You can show the example event shape with:
+Artifact link:
+- `deploy/container-worker/README.md`
+
+## Session 22
+**Backing stage:** 17-container-worker
+**Work type:** Manual only
+
+Goal: Run the container with durable ticket and idempotency files mounted.
+
 ```bash
-cat src/order_event_example.json
+docker run --rm -e PICK_WORK_QUEUE_URL="$PICK_WORK_QUEUE_URL" -v "$PWD/data:/state" tinywms-pick-ticket-worker "$PICK_WORK_QUEUE_URL" /state/pick-tickets.txt --state-file /state/pick-ticket-worker-state.json --once
 ```
-Point out:
-- `httpMethod`
-- `path`
-- `headers`
-- `body`
 
-Explain that the original order JSON now lives inside the `body` string of the Lambda proxy event.
+Observe the command output or interface before continuing. Optional safety check: `tests/test_container_worker.py`.
 
-### 7. Explain the RDS transaction boundary
-Use `src/order_service.py` and `src/rds_inventory.py` to point at:
-- request validation
-- `orders` insert
-- conditional inventory decrement
-- `order_lines` insert
-- commit
+Artifact link:
+- `deploy/container-worker/README.md`
 
-Important teaching note:
-- the order is committed in RDS before the worker updates `pick-tickets.txt`
-- the file update is asynchronous downstream work
+## Session 23
+**Backing stage:** 18-aws-deployment
+**Work type:** Manual only
 
-### 8. Show the SQS command JSON
-Print the known example command:
+Goal: Inspect how Lambda, API Gateway, RDS, SQS, EventBridge, and IAM are assembled.
+
 ```bash
-cat data/pick-work-message-example.json
+sed -n '1,320p' infra/template.yaml
+sed -n '1,320p' deploy/aws/README.md
 ```
-Or derive one from the sample order:
+
+Observe the command output or interface before continuing. Optional safety check: `tests/test_deployment_wiring.py`.
+
+Artifact link:
+- `infra/template.yaml`
+
+## Session 24
+**Backing stage:** 18-aws-deployment
+**Work type:** Manual only
+
+Goal: Package, deploy, verify, and later destroy the real application stack using the documented commands.
+
 ```bash
-python3 src/demo_trace.py --order-file data/order-example.json
+sed -n '1,320p' deploy/aws/README.md
+# Follow its package/deploy steps, then curl the resolved API URL.
 ```
-Point out that `PickWorkRequested` is a command telling a downstream worker what to do.
 
-### 9. Show the EventBridge event JSON
-Print the known example event:
+Observe the command output or interface before continuing. Optional safety check: `tests/test_aws_deployment_files.py`.
+
+Artifact link:
+- `deploy/aws/README.md`
+
+## Session 25
+**Backing stage:** 19-git-history
+**Work type:** Partly manual
+
+Goal: Compare two stage directories without inventing repository tags.
+
 ```bash
-cat data/order-placed-event-example.json
+git diff --no-index ../18-aws-deployment ../19-git-history || true
+sed -n '1,260p' docs/git-history.md
 ```
-Or derive one from the sample order:
+
+Observe the command output or interface before continuing. Optional safety check: `tests/test_deployment_wiring.py`.
+
+Artifact link:
+- `docs/git-history.md`
+
+## Session 26
+**Backing stage:** 20-final-walkthrough
+**Work type:** Partly manual
+
+Goal: Repeat the complete local order journey, then use the boundary guide for cloud demonstrations.
+
 ```bash
-python3 src/demo_trace.py --order-file data/order-example.json
-```
-Point out that `OrderPlaced` is an event describing something that already happened.
-
-### 10. Submit the order from the browser
-After clicking submit, keep the class watching:
-- browser order response JSON
-- worker stdout logs
-- `tail -f pick-tickets.txt`
-
-The observable end state should be a new appended ticket in Terminal 1.
-
-## Verification checklist
-Use these checks during or after the demo.
-
-### Browser / HTTP
-- The browser shows a JSON request body before submission.
-- The browser receives `HTTP 201` for a successful order.
-
-### Lambda / RDS
-- Inventory decreases after the order.
-- If inventory is insufficient, the browser shows a visible JSON error.
-
-### SQS / worker
-- Worker logs `received messageId=...`.
-- Worker logs `wrote pick ticket orderId=...`.
-- If ack is enabled, worker logs `acknowledged messageId=...`.
-
-### Linux file callback
-- `tail -f pick-tickets.txt` shows the appended human-readable ticket.
-- `cat pick-tickets.txt` shows order ID, customer, SKU, quantity, and bin.
-
-## Boundary-by-boundary JSON summary
-### Browser request JSON
-```json
-{
-  "customer": "Example School Store",
-  "lines": [
-    { "sku": "SKU-1001", "quantity": 1 }
-  ]
-}
+PYTHONPATH=src python3 src/http_server.py
+curl -s http://127.0.0.1:8000/inventory
+node --test tests/test_web_app.js
 ```
 
-### Lambda proxy event JSON wrapper
-```json
-{
-  "httpMethod": "POST",
-  "path": "/orders",
-  "headers": {
-    "content-type": "application/json",
-    "accept": "application/json"
-  },
-  "body": "{\n  \"customer\": \"Example School Store\",\n  \"lines\": [\n    {\n      \"sku\": \"SKU-1001\",\n      \"quantity\": 1\n    }\n  ]\n}",
-  "isBase64Encoded": false
-}
-```
+Observe the command output or interface before continuing. Optional safety check: `tests/test_demo_runbook.py`.
 
-### SQS command JSON
-```json
-{
-  "messageType": "PickWorkRequested",
-  "version": 1,
-  "orderId": 42,
-  "customer": "Example School Store",
-  "createdAt": "2026-01-15T10:30:00Z",
-  "lines": [
-    { "lineNumber": 1, "sku": "SKU-1001", "quantity": 1 }
-  ]
-}
-```
-
-### EventBridge event JSON
-```json
-{
-  "eventType": "OrderPlaced",
-  "version": 1,
-  "orderId": 42,
-  "customer": "Example School Store",
-  "placedAt": "2026-01-15T10:30:00Z",
-  "lines": [
-    { "lineNumber": 1, "sku": "SKU-1001", "quantity": 1 }
-  ]
-}
-```
-
-## Recovery notes
-- If the browser fails, verify the base URL.
-- If API Gateway fails, inspect the Lambda route and deployment stage.
-- If Lambda fails, inspect environment variables for database and queue configuration.
-- If RDS fails, verify connectivity and credentials.
-- If the order commits but no ticket appears, check SQS queue URL, worker logs, and file permissions.
-- If needed, replay the known sample message with:
-```bash
-python3 src/pick_ticket_worker.py --once --message-file data/pick-work-message-example.json --output pick-tickets.txt
-```
-
-## Cleanup
-Local demo cleanup:
-```bash
-rm -f pick-tickets.txt
-```
-If you ran the live cloud demo, stop the worker with `Ctrl+C` and destroy AWS resources later using the delete commands documented in the earlier deployment lessons.
+Artifact link:
+- `docs/end-to-end.md`

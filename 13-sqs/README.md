@@ -1,72 +1,45 @@
 # TinyWMS lesson: 13-sqs
 
 ## Stage purpose
-This stage introduces asynchronous work after a successful order commit. `POST /orders` still returns the same kind of order success JSON to the caller, but now the Lambda path also publishes a separate JSON pick-work message to Amazon SQS so pick processing can happen later in another process.
+This stage adds the first asynchronous boundary to TinyWMS: after an order commits, the system publishes one pick-work command per order line to SQS. Students can compare the synchronous order transaction from Stage 12 with the new queue handoff and inspect the JSON command shape directly.
 
 ## Files in this lesson
-- `src/order_service.py` - order handler now publishes a pick-work message after the database transaction succeeds
-- `src/pick_work.py` - defines the pick-work JSON message contract and builds the message from a committed order result
-- `src/sqs_publish.py` - small SQS publisher that uses visible AWS environment variables and prints the sent message ID
-- `src/sqs_consumer.py` - simple polling consumer that receives one or more SQS messages, prints message metadata and JSON body, and optionally acknowledges them
-- `data/pick-work-message-example.json` - example pick-work message students can inspect before touching AWS
-- `docs/data-contracts.md` - documents the SQS message contract separately from the existing HTTP order contract
-- `docs/architecture.md` - explains the new boundary from synchronous HTTP/database work to asynchronous queue-based work
-- `deploy/sqs/template.json` - minimal CloudFormation for a teaching queue
-- `deploy/sqs/send-example.sh` - sends the example pick-work message to SQS from the command line
-- `deploy/sqs/receive.sh` - runs the Python consumer against the queue
-- `tests/test_pick_work.py` - tests the message shape built from committed order data
-- `tests/test_sqs_publish.py` - tests visible SQS publishing behavior without calling AWS
-- `tests/test_sqs_consumer.py` - tests receive/acknowledgement behavior and retry visibility
+- `README.md` - lesson guide for the SQS handoff, local consumer helper, and continuity checks.
+- `docs/architecture.md` - updated component map showing the queue boundary and the new consumer role.
+- `docs/data-contracts.md` - updated contract guide with the pick-work command shape.
+- `data/pick-work.json` - visible example of the pick-work command JSON contract.
+- `deploy/sqs/README.md` - queue deployment notes with exact deploy, resolve, verify, and destroy commands.
+- `infra/sqs.yaml` - minimal CloudFormation template for the pick-work queue.
+- `src/lambda_inventory.py` - order path evolved to publish pick-work commands after commit.
+- `src/sqs_consumer.py` - small SQS consumer helper that long-polls once, decodes message JSON, and deletes only after success.
+- `tests/test_concurrency.py` - concurrency proof updated to inject a fake SQS client and prove rollback never publishes.
+- `tests/test_lambda_inventory.py` - Lambda contract tests updated for the queue publish boundary.
+- `tests/test_sqs_consumer.py` - local consumer tests for receive, delete, failure, and multi-message behavior.
+- `tests/test_web_app.js` - inherited browser-contract safety check.
 
 ## Run the lesson
 From this folder:
 ```bash
-python3 -m unittest discover -s tests
-node --test tests/test_web_app.js
-python3 -m src.pick_work < data/pick-work-message-example.json
-```
-
-To publish a real queue message after creating an order through Lambda, set these environment variables before invoking the order path:
-```bash
-export TINYWMS_DB_HOST=127.0.0.1
-export TINYWMS_DB_PORT=5432
-export TINYWMS_DB_NAME=tinywms
-export TINYWMS_DB_USER=tinywms
-export TINYWMS_DB_PASSWORD=secret
-export TINYWMS_SQS_QUEUE_URL=https://sqs.us-east-1.amazonaws.com/123456789012/tinywms-pick-work
-export AWS_REGION=us-east-1
-python3 src/lambda_inventory.py < src/order_event_example.json
-```
-The order response still comes back immediately after the database commit. Pick work is placed onto SQS separately.
-
-To consume messages from the queue:
-```bash
-export TINYWMS_SQS_QUEUE_URL=https://sqs.us-east-1.amazonaws.com/123456789012/tinywms-pick-work
-export AWS_REGION=us-east-1
-python3 src/sqs_consumer.py --max-messages 1 --ack
-```
-Run without `--ack` to make retries visible:
-```bash
-python3 src/sqs_consumer.py --max-messages 1
+PYTHONPATH=src python3 -m unittest discover -s tests -v
 ```
 
 ## Run tests
 ```bash
-python3 -m unittest discover -s tests
+PYTHONPATH=src python3 -m unittest discover -s tests -v
 node --test tests/test_web_app.js
 ```
 
 ## Student exercises
-1. Edit `src/pick_work.py` to add a new top-level field such as `warehouse`. Update the tests and `docs/data-contracts.md`, then re-run the suite.
-2. Run `python3 src/sqs_consumer.py --max-messages 1` without `--ack`, then run it again after the message visibility timeout expires. Explain why the same message can appear again and which code line controls acknowledgement.
-
+1. Change the queue command body in `src/lambda_inventory.py` to include a temporary note field, observe the changed behavior through the lesson's visible interface, then optionally run the tests or a small injected fake SQS client, and inspect the exact JSON sent to the fake SQS client in the visible test output.
+2. Edit the consumer callback in `tests/test_sqs_consumer.py` so it raises on one message, observe the changed behavior through the lesson's visible interface, then optionally run the tests, and observe that the message is left undeleted while the successful message still gets acknowledged.
 ## Continuity note
-- Inherited contract: `GET /inventory` and `POST /orders` keep the same HTTP routes and JSON request/response meanings used by the browser and earlier Lambda tests
-- Boundary changed in this stage: after a successful committed order, TinyWMS now crosses a new AWS boundary by publishing a JSON pick-work command message to Amazon SQS instead of doing downstream work synchronously inside the HTTP request
+- Inherited contract: the inventory JSON contract, order JSON contract, HTTP order path, browser order page, SQLite classroom path, and Stage 12 concurrency guard remain valid.
+- Boundary changed in this stage: the committed order path now crosses a queue boundary before pick-ticket work begins, and the consumer processes SQS messages one poll at a time.
+
+## Component assembly update
+- Added: `data/pick-work.json`, `infra/sqs.yaml`, `deploy/sqs/README.md`, and `src/sqs_consumer.py` as the new queue and consumer lesson artifacts.
+- Reused unchanged: `data/inventory.json`, `data/inventory.schema.json`, `data/orders.schema.json`, `data/schema.sql`, `data/seed.sql`, `data/init_db.py`, `src/http_server.py`, `src/inventory_cli.py`, `src/inventory_watcher.py`, `src/linux_visible.py`, `src/order_form.html`, `src/sql_export.py`, `src/web/index.html`, `src/web/app.js`, `src/web/style.css`, `deploy/ec2/README.md`, `deploy/ec2/environment.example`, `deploy/ec2/run_inventory_server.sh`, `deploy/api-gateway/README.md`, `deploy/lambda/README.md`, `deploy/rds/README.md`, `infra/api-gateway.yaml`, `infra/lambda.yaml`, `infra/rds.yaml`, `tests/test_http_order_flow.py`, `tests/test_http_server.py`, `tests/test_inventory_cli.py`, `tests/test_inventory_watcher.py`, `tests/test_linux_visible.py`, `tests/test_relational_persistence.py`, `tests/test_sqlite_orders.py`, and `tests/test_web_app.js`.
+- Replaced/evolved: `src/lambda_inventory.py`, `tests/test_concurrency.py`, and `tests/test_lambda_inventory.py` now prove the order path commits before any queue publish and that rollback never sends messages.
 
 ## Cleanup
-Local automated tests do not create AWS resources. If you deploy the SQS queue, delete the CloudFormation stack or queue when finished to avoid small ongoing charges:
-```bash
-aws cloudformation delete-stack --stack-name tinywms-sqs
-```
-Also unset environment variables containing database or queue settings when you are done with a lab shell.
+No external resources are created by the Python tests. If you deploy the queue lesson, destroy the CloudFormation stack when you are done.

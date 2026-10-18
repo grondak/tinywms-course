@@ -1,55 +1,65 @@
 # TinyWMS lesson: 11-orders
 
 ## Stage purpose
-This stage introduces a second application contract: warehouse orders. Students can now submit an order as JSON through `POST /orders`, watch Lambda validate it, write relational rows, decrement inventory in one database transaction, and see a clean failure when stock is insufficient.
+This stage adds the first write path to TinyWMS. Students can submit a small JSON order, watch the server validate and commit it inside a database transaction, and then see the inventory quantity change through the same visible HTTP and browser contracts used earlier.
 
 ## Files in this lesson
-- `src/lambda_inventory.py` - Lambda handler that now serves both `GET /inventory` and `POST /orders`
-- `src/order_service.py` - small order-validation and transaction logic kept separate from the HTTP/Lambda event wrapper
-- `src/rds_inventory.py` - database helper extended with order creation and inventory decrement logic
-- `src/order_event_example.json` - sample API Gateway style event for a valid order submission
-- `src/order_bad_event_example.json` - sample event that requests too much inventory and demonstrates rollback behavior
-- `src/web/index.html` - browser page extended with a plain HTML order form next to the inventory view
-- `src/web/app.js` - browser JavaScript that still loads inventory and now submits order JSON visibly
-- `data/order.schema.json` - JSON Schema document for the minimal order request contract
-- `data/order-example.json` - example order document students can inspect and reuse with curl
-- `data/schema.sql` - relational schema extended with `orders` and `order_lines`
-- `data/seed.sql` - seed data compatible with the extended schema
-- `deploy/rds/bootstrap.sql` - RDS bootstrap SQL updated with the new order tables
-- `deploy/apigateway/template.json` - API Gateway template extended with `POST /orders`
-- `deploy/lambda-rds/template.json` - Lambda deployment template still points to the same handler, now supporting orders too
-- `deploy/lambda-rds/invoke-order.sh` - local Lambda-style invocation for a successful order request
-- `deploy/lambda-rds/invoke-order-too-many.sh` - local Lambda-style invocation for an insufficient-inventory request
-- `docs/architecture.md` - explains the new order boundary and transaction/rollback behavior
-- `docs/data-contracts.md` - documents the new order JSON request and response shapes and their table mapping
-- `tests/test_lambda_inventory.py` - expanded tests for `POST /orders` success and failure paths
-- `tests/test_order_service.py` - focused tests for order validation and response shaping
-- `tests/test_rds_inventory.py` - tests for row mapping plus transactional order database logic using SQLite-compatible test connections
-- `tests/test_http_server.py` - still proves the old Linux server `GET /inventory` contract remains intact
+- `data/.gitkeep` - keeps the `data/` directory present in a clean checkout.
+- `data/init_db.py` - inherited module-form initializer for the relational schema and seed data.
+- `data/inventory.json` - canonical inventory sample and contract input for earlier stages.
+- `data/inventory.schema.json` - JSON Schema for the inventory contract.
+- `data/orders.schema.json` - new JSON Schema for the order contract.
+- `data/schema.sql` - evolved relational schema that adds `orders` and `order_lines`.
+- `data/seed.sql` - seed rows derived from the inventory JSON sample.
+- `deploy/api-gateway/README.md` - inherited deployment notes for the Lambda front door.
+- `deploy/ec2/README.md` - inherited EC2 runbook for the unchanged HTTP server path.
+- `deploy/ec2/environment.example` - inherited environment example for the EC2 server.
+- `deploy/ec2/run_inventory_server.sh` - inherited EC2 launcher for the HTTP server.
+- `deploy/lambda/README.md` - inherited Lambda deployment notes.
+- `deploy/rds/README.md` - inherited RDS deployment notes.
+- `docs/architecture.md` - component map and evolution notes for the order lesson.
+- `docs/data-contracts.md` - contract guide that now documents order JSON and the order tables.
+- `src/http_server.py` - local HTTP server that now serves the browser assets and accepts `POST /orders`.
+- `src/lambda_inventory.py` - Lambda handler evolved to validate and commit orders transactionally.
+- `src/order_form.html` - preserved standalone order form for historical comparison.
+- `src/web/app.js` - browser app evolved into the integrated inventory-and-order workflow.
+- `src/web/index.html` - integrated browser page that shows inventory, order JSON, and response JSON.
+- `src/web/style.css` - shared browser styling.
+- `tests/test_http_order_flow.py` - local HTTP integration proof for order submission and refreshed inventory.
+- `tests/test_sqlite_orders.py` - SQLite-backed order transaction tests using the real initializer and adapter.
+- `tests/test_http_server.py` - inherited HTTP contract tests for `GET /inventory`.
+- `tests/test_inventory_cli.py` - inherited CLI contract tests.
+- `tests/test_inventory_watcher.py` - inherited watcher tests.
+- `tests/test_linux_visible.py` - inherited Linux visibility tests.
+- `tests/test_lambda_inventory.py` - inherited Lambda inventory tests.
+- `tests/test_relational_persistence.py` - inherited relational persistence tests.
+- `tests/test_web_app.js` - Node safety check for the browser contract.
 
 ## Run the lesson
 From this folder:
 ```bash
-python3 -m unittest discover -s tests
-TINYWMS_DB_HOST=127.0.0.1 TINYWMS_DB_PORT=5432 TINYWMS_DB_NAME=tinywms TINYWMS_DB_USER=tinywms TINYWMS_DB_PASSWORD=secret python3 src/lambda_inventory.py < src/lambda_event_example.json
-TINYWMS_DB_HOST=127.0.0.1 TINYWMS_DB_PORT=5432 TINYWMS_DB_NAME=tinywms TINYWMS_DB_USER=tinywms TINYWMS_DB_PASSWORD=secret python3 src/lambda_inventory.py < src/order_event_example.json
-TINYWMS_PORT=8000 python3 src/http_server.py data/inventory.json
+PYTHONPATH=src python3 -m unittest discover -s tests -v
+python3 -m data.init_db
+python3 src/http_server.py
 ```
-The first two commands exercise the Lambda shape locally. The order command requires a PostgreSQL-compatible database loaded with the TinyWMS schema and seed data. The third command runs the older Linux HTTP server path so students can compare the historical `/inventory` implementation with the cloud order path.
 
 ## Run tests
 ```bash
-python3 -m unittest discover -s tests
+PYTHONPATH=src python3 -m unittest discover -s tests -v
 node --test tests/test_web_app.js
 ```
 
 ## Student exercises
-1. Edit `src/order_service.py` so the order validation rejects duplicate SKUs in one request, then add a test and re-run the suite.
-2. Submit `src/order_bad_event_example.json`, inspect the failure JSON, and then query the database to confirm no partial `orders` or `order_lines` rows were committed.
-
+1. Change the default quantity or SKU in `src/web/app.js`, run the local HTTP server, and submit an order from the browser while watching the inventory table refresh after acceptance.
+2. Edit `tests/test_http_order_flow.py` so the temporary order requests two units instead of one, then observe the changed on-disk inventory response through the HTTP endpoint before optionally re-running the test suite.
 ## Continuity note
-- Inherited contract: `GET /inventory` still returns the same inventory JSON document used by the browser, CLI examples, and previous Lambda/API Gateway stages
-- Boundary changed in this stage: API Gateway and Lambda now also accept `POST /orders`, and Lambda performs a database transaction that writes order rows and decrements inventory in RDS
+- Inherited contract: the inventory JSON fields, inventory schema, CLI, Linux-visible tools, `GET /inventory`, browser inventory page, EC2 deployment wrapper, Lambda inventory path, API Gateway front door, and the SQLite/PostgreSQL relational path remain valid.
+- Boundary changed in this stage: the local HTTP server and Lambda handler now accept `POST /orders`, validate the request, write order rows, decrement inventory, and return visible order JSON.
+
+## Component assembly update
+- Added: `data/orders.schema.json`, `tests/test_http_order_flow.py`, `tests/test_sqlite_orders.py`, and the integrated order workflow in `src/http_server.py`, `src/lambda_inventory.py`, `src/web/index.html`, and `src/web/app.js`.
+- Reused unchanged: `data/inventory.json`, `data/inventory.schema.json`, `data/init_db.py`, `data/seed.sql`, `src/order_form.html`, `src/web/style.css`, `deploy/ec2/README.md`, `deploy/ec2/environment.example`, `deploy/ec2/run_inventory_server.sh`, `deploy/api-gateway/README.md`, `deploy/lambda/README.md`, `deploy/rds/README.md`, `tests/test_http_server.py`, `tests/test_inventory_cli.py`, `tests/test_inventory_watcher.py`, `tests/test_linux_visible.py`, `tests/test_lambda_inventory.py`, `tests/test_relational_persistence.py`, and `tests/test_web_app.js`.
+- Replaced/evolved: `data/schema.sql`, `src/http_server.py`, `src/lambda_inventory.py`, `src/web/index.html`, and `src/web/app.js` now support transactional order placement while preserving the earlier inventory contract.
 
 ## Cleanup
-No AWS resources are created by the automated tests. If you deploy the Lambda, API Gateway, or RDS resources, delete the Lambda function, API resources, RDS instance, subnet group, security groups, and any logs or stacks you created to avoid charges. If you create test order rows manually, you can reset the lesson state by dropping and recreating the schema with `deploy/rds/bootstrap.sql`.
+No external resources are created in this stage. If you created a local SQLite database while exercising the lesson, remove `data/tinywms.db` when you are done.
