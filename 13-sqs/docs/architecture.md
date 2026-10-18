@@ -46,6 +46,7 @@ SQLite cannot demonstrate the PostgreSQL row-lock lesson.
 | pick-work command publisher | 13-sqs | AWS Lambda (`src/lambda_inventory.py`) after commit | committed order request plus locked inventory row data | versioned pick-work command JSON sent to SQS | order handler, relational schema, SQS client, queue URL |
 | pick-work SQS queue | 13-sqs | AWS SQS (`infra/sqs.yaml`, `deploy/sqs/README.md`) | pick-work command JSON | durable queue message ready for a consumer | order handler, SQS service, CloudFormation deployment |
 | SQS consumer helper | 13-sqs | Linux Python process (`src/sqs_consumer.py`) | queue URL and callback function | decoded command JSON delivered to the callback, message delete on success | SQS client, pick-work command contract |
+| local mode (SQLite and a file queue) | 13-sqs | Python process on Linux (`TINYWMS_LOCAL=1`, `src/local_aws.py`, `deploy/local/run_local.sh`) | the same handler calls and queue/event calls the AWS clients receive | one JSON file per pick-work message | Lambda handler, SQLite database |
 
 ## Component evolution timeline
 

@@ -51,6 +51,7 @@ SQLite cannot demonstrate the PostgreSQL row-lock lesson.
 | EventBridge order bus | 14-domain-events | AWS EventBridge (`infra/events.yaml`, `deploy/events/README.md`) | `OrderPlaced` event pattern | fan-out delivery to two target queues | order handler, EventBridge rules, SQS targets, queue policies |
 | event consumer A | 14-domain-events | Linux Python process (`src/event_consumer_a.py`) | queue URL for target A and callback semantics | decoded event JSON printed/processed by the consumer | SQS client, event contract |
 | event consumer B | 14-domain-events | Linux Python process (`src/event_consumer_b.py`) | queue URL for target B and callback semantics | decoded event JSON printed/processed by the consumer | SQS client, event contract |
+| local mode (SQLite, a file queue and a file event bus) | 16-callback-demo | Python process on Linux (`TINYWMS_LOCAL=1`, `src/local_aws.py`, `deploy/local/run_local.sh`) | the same handler calls and queue/event calls the AWS clients receive | one JSON file per message, with each event copied to both event-consumer queues | Lambda handler, SQLite database |
 
 ## Component evolution timeline
 

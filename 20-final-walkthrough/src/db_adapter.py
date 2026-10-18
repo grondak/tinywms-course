@@ -62,6 +62,15 @@ class SQLiteConnectionAdapter:
         return self._connection.close()
 
 
+def connect_sqlite(path=None):
+    """Return an open SQLite connection wrapped in the adapter. The caller closes it."""
+    db_path = Path(path or os.environ.get('TINYWMS_SQLITE_PATH', 'tinywms.sqlite3'))
+    connection = sqlite3.connect(db_path, timeout=10)
+    connection.row_factory = None
+    connection.execute('PRAGMA foreign_keys=ON')
+    return SQLiteConnectionAdapter(connection)
+
+
 @contextmanager
 def open_connection():
     backend = os.environ.get('TINYWMS_DB', 'postgres').strip().lower()

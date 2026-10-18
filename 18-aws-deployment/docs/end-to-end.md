@@ -131,7 +131,7 @@ PYTHONPATH=src python3 -m unittest tests.test_deployment_wiring -v
 
 ### Worker against a queue URL
 ```bash
-python3 src/pick_ticket_worker.py <queue-url> pick-tickets.txt --once
+python3 -m src.pick_ticket_worker <queue-url> pick-tickets.txt --once
 ```
 
 ### Full repository tests

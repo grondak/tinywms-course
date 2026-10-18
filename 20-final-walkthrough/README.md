@@ -53,6 +53,17 @@ This lesson turns the repository history into part of the teaching material. Stu
 - `tests/test_inventory_cli.py` - inventory CLI checks
 - `tests/test_aws_deployment_files.py` - consolidated AWS deployment checks
 
+## Run the whole system on your own machine
+No AWS account needed. One command starts the web page, the order API (the same handler code Lambda runs), a SQLite database, a queue, an event bus and the pick-ticket worker:
+```bash
+bash deploy/local/run_local.sh            # add --reset to start from a clean database
+# open http://127.0.0.1:8000/ , submit an order, then in a second terminal:
+tail -f pick-tickets.txt
+ls local-aws/pick-work local-aws/event-consumer-a      # the queue and the event, as files
+python3 src/event_consumer_a.py local-aws/event-consumer-a      # needs: export TINYWMS_LOCAL=1
+```
+How it maps to the cloud design: the SQLite file stands in for RDS, each directory under `local-aws/` is an SQS queue (one JSON file per message), the event bus copies each event into `event-consumer-a` and `event-consumer-b` like the two EventBridge rules in `infra/events.yaml`, and `TINYWMS_LOCAL=1` is the only switch. Real SQS keeps a message hidden while a worker handles it and may deliver it twice; the file queue does neither, so the duplicate and retry lessons still need the tests or the cloud stack.
+
 ## Run the lesson
 From this folder:
 ```bash

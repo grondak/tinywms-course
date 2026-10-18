@@ -4,6 +4,9 @@
 This stage keeps the TinyWMS inventory contract stable while changing the Lambda implementation to read inventory from PostgreSQL/RDS instead of static JSON in the deployed path. Students can compare the unchanged JSON shape with the new database-backed compute path and still use the SQLite classroom path locally.
 
 ## Files in this lesson
+- `deploy/local/run_local.sh` - starts the system on one machine, no AWS needed
+- `src/local_aws.py` - configures local mode
+- `tests/test_local_stack.py` - drives local mode over HTTP
 - `data/.gitkeep` - keeps the `data/` directory present in a clean checkout.
 - `data/init_db.py` - inherited module-form initializer for the relational schema and seed data.
 - `data/inventory.json` - canonical inventory sample and contract input for the earlier stages.
@@ -40,6 +43,14 @@ This stage keeps the TinyWMS inventory contract stable while changing the Lambda
 - `tests/test_lambda_inventory.py` - evolved Lambda inventory tests that inject a fake database connection.
 - `tests/test_relational_persistence.py` - inherited relational persistence tests.
 - `tests/test_web_app.js` - inherited Node safety check for the browser contract.
+
+## Run it on your own machine
+No AWS account needed. The same handler code Lambda runs answers the page, reading rows from a SQLite file instead of RDS:
+```bash
+bash deploy/local/run_local.sh            # add --reset to start from a clean database
+# open http://127.0.0.1:8000/
+```
+Setting `TINYWMS_LOCAL=1` is the only switch; `deploy/local/run_local.sh` sets it for you and creates `local-aws/tinywms.db` from `data/schema.sql` and `data/seed.sql` on first start.
 
 ## Run the lesson
 From this folder:

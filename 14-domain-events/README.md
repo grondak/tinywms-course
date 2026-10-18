@@ -4,6 +4,9 @@
 This stage separates two ideas that were previously combined: the imperative pick-work command sent to SQS and the factual `OrderPlaced` event sent to EventBridge. Students can compare "do this next" with "this happened" while keeping the existing order transaction, queue command, and inventory contract intact.
 
 ## Files in this lesson
+- `deploy/local/run_local.sh` - starts the system on one machine, no AWS needed
+- `src/local_aws.py` - configures local mode and provides the directory-backed queue and event bus
+- `tests/test_local_stack.py` - drives local mode over HTTP
 - `README.md` - lesson guide for the event boundary, consumer demos, and compatibility checks.
 - `docs/architecture.md` - updated component map and stage history showing the new event path beside the existing queue path.
 - `docs/data-contracts.md` - updated contract guide with the `OrderPlaced` event shape and its relation to the queue command.
@@ -17,6 +20,18 @@ This stage separates two ideas that were previously combined: the imperative pic
 - `tests/test_event_consumers.py` - local tests for the two independent EventBridge consumers.
 - `tests/test_sqs_consumer.py` - inherited queue consumer tests that still prove receive/delete semantics.
 - `tests/test_web_app.js` - inherited browser-contract safety check.
+
+## Run it on your own machine
+No AWS account needed. The order API runs the same handler code as Lambda against SQLite; pick-work commands go to `local-aws/pick-work` and each `OrderPlaced` event is copied to `local-aws/event-consumer-a` and `local-aws/event-consumer-b`, like the two EventBridge rules in `infra/events.yaml`:
+```bash
+bash deploy/local/run_local.sh            # add --reset to start from a clean database
+# open http://127.0.0.1:8000/ , submit an order, then in a second terminal:
+ls local-aws/*
+export TINYWMS_LOCAL=1
+python3 src/event_consumer_a.py local-aws/event-consumer-a
+python3 src/event_consumer_b.py local-aws/event-consumer-b
+```
+The pick-ticket worker arrives in the next stage; for now `cat local-aws/pick-work/*.json` shows the commands it will consume.
 
 ## Run the lesson
 From this folder:

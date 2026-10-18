@@ -8,7 +8,10 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from src.sqs_consumer import consume_messages
+try:
+    from src.sqs_consumer import consume_messages
+except ModuleNotFoundError:         # the container image copies the files flat into /app
+    from sqs_consumer import consume_messages
 
 
 DEFAULT_STATE_FILE = 'pick-ticket-worker-state.json'

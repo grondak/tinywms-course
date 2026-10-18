@@ -4,6 +4,9 @@
 This stage adds the first write path to TinyWMS. Students can submit a small JSON order, watch the server validate and commit it inside a database transaction, and then see the inventory quantity change through the same visible HTTP and browser contracts used earlier.
 
 ## Files in this lesson
+- `deploy/local/run_local.sh` - starts the system on one machine, no AWS needed
+- `src/local_aws.py` - configures local mode
+- `tests/test_local_stack.py` - drives local mode over HTTP
 - `data/.gitkeep` - keeps the `data/` directory present in a clean checkout.
 - `data/init_db.py` - inherited module-form initializer for the relational schema and seed data.
 - `data/inventory.json` - canonical inventory sample and contract input for earlier stages.
@@ -34,6 +37,15 @@ This stage adds the first write path to TinyWMS. Students can submit a small JSO
 - `tests/test_lambda_inventory.py` - inherited Lambda inventory tests.
 - `tests/test_relational_persistence.py` - inherited relational persistence tests.
 - `tests/test_web_app.js` - Node safety check for the browser contract.
+
+## Run it on your own machine
+No AWS account needed. `GET /inventory` and `POST /orders` go through the same handler code Lambda runs, against a SQLite file instead of RDS:
+```bash
+bash deploy/local/run_local.sh            # add --reset to start from a clean database
+# open http://127.0.0.1:8000/ , submit an order, and watch the quantities change
+curl -s -H 'Content-Type: application/json' -d '{"order_id":"ORD-1","lines":[{"sku":"SKU-1001","quantity":1}]}' http://127.0.0.1:8000/orders
+```
+Setting `TINYWMS_LOCAL=1` is the only switch; it creates `local-aws/tinywms.db` on first start. A bad request returns 400, a shortage, unknown SKU or repeated `order_id` returns 409, and a rejected order changes nothing.
 
 ## Run the lesson
 From this folder:

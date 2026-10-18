@@ -109,6 +109,12 @@ The repository includes focused tests that keep the walkthrough truthful:
 ## Runnable commands
 From the repository root, the visible commands are:
 
+### The whole system on one machine
+```bash
+bash deploy/local/run_local.sh
+```
+This runs the same `src/lambda_inventory.py` order code that Lambda runs, against SQLite, with the queue and event bus as directories under `local-aws/`, and starts `src/pick_ticket_worker.py` to write `pick-tickets.txt`. `tests/test_local_stack.py` proves the whole path.
+
 ### Local walkthrough server
 ```bash
 python3 src/http_server.py
@@ -131,7 +137,7 @@ PYTHONPATH=src python3 -m unittest tests.test_deployment_wiring -v
 
 ### Worker against a queue URL
 ```bash
-python3 src/pick_ticket_worker.py <queue-url> pick-tickets.txt --once
+python3 -m src.pick_ticket_worker <queue-url> pick-tickets.txt --once
 ```
 
 ### Full repository tests

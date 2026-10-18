@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import dataclass
 from typing import Any, Callable
 
@@ -22,6 +23,9 @@ class ReceivedMessage:
 
 
 def _default_sqs_client():
+    if os.environ.get('TINYWMS_LOCAL'):
+        from src.local_aws import FileQueue
+        return FileQueue()
     if boto3 is None:
         raise RuntimeError('boto3 is required only when no injected SQS client is provided')
     return boto3.client('sqs')

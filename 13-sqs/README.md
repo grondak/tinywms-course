@@ -4,6 +4,9 @@
 This stage adds the first asynchronous boundary to TinyWMS: after an order commits, the system publishes one pick-work command per order line to SQS. Students can compare the synchronous order transaction from Stage 12 with the new queue handoff and inspect the JSON command shape directly.
 
 ## Files in this lesson
+- `deploy/local/run_local.sh` - starts the system on one machine, no AWS needed
+- `src/local_aws.py` - configures local mode and provides the directory-backed queue
+- `tests/test_local_stack.py` - drives local mode over HTTP
 - `README.md` - lesson guide for the SQS handoff, local consumer helper, and continuity checks.
 - `docs/architecture.md` - updated component map showing the queue boundary and the new consumer role.
 - `docs/data-contracts.md` - updated contract guide with the pick-work command shape.
@@ -16,6 +19,16 @@ This stage adds the first asynchronous boundary to TinyWMS: after an order commi
 - `tests/test_lambda_inventory.py` - Lambda contract tests updated for the queue publish boundary.
 - `tests/test_sqs_consumer.py` - local consumer tests for receive, delete, failure, and multi-message behavior.
 - `tests/test_web_app.js` - inherited browser-contract safety check.
+
+## Run it on your own machine
+No AWS account needed. The order API runs the same handler code as Lambda against SQLite, and the pick-work commands land in a directory that stands in for the SQS queue:
+```bash
+bash deploy/local/run_local.sh            # add --reset to start from a clean database
+# open http://127.0.0.1:8000/ , submit an order, then in a second terminal:
+ls local-aws/pick-work
+cat local-aws/pick-work/*.json
+```
+One JSON file per message, one message per order line. `TINYWMS_LOCAL=1` is the only switch. Real SQS hides a message while a worker handles it and may deliver it twice; the file queue does neither.
 
 ## Run the lesson
 From this folder:

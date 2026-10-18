@@ -4,6 +4,9 @@
 This stage shows why a naive order transaction can oversell stock when two requests overlap, then fixes that behavior with a visible database transaction guard. Students can run a small demo that prints the race before and after the fix, and they can compare the local SQLite proof with the real PostgreSQL row-lock lesson.
 
 ## Files in this lesson
+- `deploy/local/run_local.sh` - starts the system on one machine, no AWS needed
+- `src/local_aws.py` - configures local mode
+- `tests/test_local_stack.py` - drives local mode over HTTP
 - `README.md` - lesson guide for the concurrency demo, tests, and classroom exercises.
 - `docs/architecture.md` - updated component map showing the hardening of the existing order/database path.
 - `docs/data-contracts.md` - contract guide updated with the concurrency lesson note.
@@ -15,6 +18,15 @@ This stage shows why a naive order transaction can oversell stock when two reque
 - `tests/test_relational_persistence.py` - inherited relational persistence checks.
 - `tests/test_sqlite_orders.py` - inherited SQLite transaction and rollback proofs.
 - `tests/test_web_app.js` - inherited browser-contract safety check.
+
+## Run it on your own machine
+No AWS account needed. `GET /inventory` and `POST /orders` go through the same handler code Lambda runs, against a SQLite file instead of RDS:
+```bash
+bash deploy/local/run_local.sh            # add --reset to start from a clean database
+# open http://127.0.0.1:8000/ , submit an order, and watch the quantities change
+curl -s -H 'Content-Type: application/json' -d '{"order_id":"ORD-1","lines":[{"sku":"SKU-1001","quantity":1}]}' http://127.0.0.1:8000/orders
+```
+Setting `TINYWMS_LOCAL=1` is the only switch; it creates `local-aws/tinywms.db` on first start. A bad request returns 400, a shortage, unknown SKU or repeated `order_id` returns 409, and a rejected order changes nothing. SQLite locks the whole file, so it cannot show the row-lock lesson; that needs PostgreSQL.
 
 ## Run the lesson
 From this folder:

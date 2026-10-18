@@ -14,6 +14,9 @@ class OrderValidationError(InventoryError):
 
 class InventoryShortageError(InventoryError):
     pass
+
+class DuplicateOrderError(InventoryError):
+    pass
 InventoryLookupError = InventoryShortageError
 InventoryLookupError = InventoryShortageError
 
@@ -56,7 +59,10 @@ def _map_inventory_row(row: Any) -> dict[str, Any]:
 def _parse_body(event: dict[str, Any]) -> dict[str, Any]:
     body = event.get('body') or '{}'
     if isinstance(body, str):
-        return json.loads(body)
+        try:
+            return json.loads(body)
+        except json.JSONDecodeError as exc:
+            raise OrderValidationError('request body must be JSON') from exc
     if isinstance(body, dict):
         return body
     raise OrderValidationError('request body must be JSON')
@@ -105,12 +111,18 @@ def _build_order_placed_event(order: OrderRequest) -> dict[str, Any]:
 def _sqs_client(sqs_client=None):
     if sqs_client is not None:
         return sqs_client
+    if os.environ.get('TINYWMS_LOCAL'):
+        from src.local_aws import FileQueue
+        return FileQueue()
     import boto3
     return boto3.client('sqs')
 
 def _eventbridge_client(eventbridge_client=None):
     if eventbridge_client is not None:
         return eventbridge_client
+    if os.environ.get('TINYWMS_LOCAL'):
+        from src.local_aws import FileEventBus
+        return FileEventBus()
     import boto3
     return boto3.client('events')
 
@@ -129,6 +141,13 @@ def open_connection(dsn: str | None=None) -> Iterator[Any]:
     finally:
         connection.close()
 
+def _open_default_connection():
+    """Connection used when the caller does not inject one: SQLite when TINYWMS_DB=sqlite, otherwise PostgreSQL."""
+    if os.environ.get('TINYWMS_DB', 'postgres').strip().lower() == 'sqlite':
+        from src.db_adapter import connect_sqlite
+        return connect_sqlite()
+    return _psycopg2_connect(os.environ[DB_DSN_ENV])
+
 def place_order(connection, order: OrderRequest, sqs_client=None, eventbridge_client=None) -> dict[str, Any]:
     locked_rows: list[dict[str, Any]] = []
     cursor = _cursor_for_connection(connection)
@@ -146,7 +165,12 @@ def place_order(connection, order: OrderRequest, sqs_client=None, eventbridge_cl
             if cursor.rowcount != 1:
                 raise InventoryShortageError(f'insufficient inventory for {line.sku}')
             locked_rows.append(row)
-        cursor.execute(INSERT_ORDER_SQL, (order.order_id, 'accepted'))
+        try:
+            cursor.execute(INSERT_ORDER_SQL, (order.order_id, 'accepted'))
+        except Exception as exc:
+            if type(exc).__name__ in ('IntegrityError', 'UniqueViolation'):
+                raise DuplicateOrderError(f'order already exists: {order.order_id}') from exc
+            raise
         for line in order.lines:
             cursor.execute(INSERT_ORDER_LINE_SQL, (order.order_id, line.sku, line.quantity))
         connection.commit()
@@ -185,20 +209,19 @@ def handler(event, context, connection_factory: Callable[[], Any] | None=None, s
     if method == 'POST':
         try:
             order = parse_order_request(event)
-            connection = connection_factory() if connection_factory is not None else open_connection().__enter__()
+            connection = (connection_factory or _open_default_connection)()
             try:
                 result = place_order(connection, order, sqs_client=sqs_client, eventbridge_client=eventbridge_client)
             finally:
-                if connection_factory is not None:
-                    connection.close()
+                connection.close()
             return {'statusCode': 201, 'headers': {'Content-Type': 'application/json'}, 'body': json.dumps(result)}
         except OrderValidationError as exc:
             return {'statusCode': 400, 'headers': {'Content-Type': 'application/json'}, 'body': json.dumps({'error': str(exc)})}
-        except InventoryShortageError as exc:
+        except (InventoryShortageError, DuplicateOrderError) as exc:
             return {'statusCode': 409, 'headers': {'Content-Type': 'application/json'}, 'body': json.dumps({'error': str(exc)})}
     query_string = event.get('queryStringParameters') or {}
     if query_string.get('demo') == 'local-json':
         return {'statusCode': 200, 'headers': {'Content-Type': 'application/json'}, 'body': json.dumps(_load_inventory())}
-    factory = connection_factory or open_connection
+    factory = connection_factory or _open_default_connection
     payload = _inventory_payload(factory)
     return {'statusCode': 200, 'headers': {'Content-Type': 'application/json'}, 'body': json.dumps(payload)}

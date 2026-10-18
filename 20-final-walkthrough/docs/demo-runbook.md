@@ -406,7 +406,9 @@ Artifact link:
 Goal: Repeat the complete local order journey, then use the boundary guide for cloud demonstrations.
 
 ```bash
-PYTHONPATH=src python3 src/http_server.py
+bash deploy/local/run_local.sh --reset
+# open http://127.0.0.1:8000/ and submit an order; in a second terminal:
+tail -f pick-tickets.txt
 curl -s http://127.0.0.1:8000/inventory
 node --test tests/test_web_app.js
 ```

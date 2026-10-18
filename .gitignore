@@ -54,3 +54,7 @@ dist/
 
 # Generator-only metadata is not part of the published course repository
 .regen.json
+
+# Local-mode state (20-final-walkthrough)
+local-aws/
+pick-ticket-worker-state.json

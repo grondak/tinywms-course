@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlparse
@@ -12,6 +13,9 @@ WEB_DIR = ROOT / 'src' / 'web'
 DEFAULT_INVENTORY = ROOT / 'data' / 'inventory.json'
 PORT = int(os.environ.get('TINYWMS_PORT', '8000'))
 INVENTORY_FILE = Path(os.environ.get('TINYWMS_INVENTORY_FILE', str(DEFAULT_INVENTORY)))
+# TINYWMS_LOCAL=1: serve /inventory through the same handler code that Lambda runs,
+# reading from SQLite instead of RDS (see src/local_aws.py).
+LOCAL = bool(os.environ.get('TINYWMS_LOCAL'))
 
 
 def _content_type(path: str) -> str:
@@ -41,6 +45,19 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _send_handler_response(self, method: str) -> None:
+        from src.lambda_inventory import handler
+        try:
+            response = handler({'httpMethod': method}, None)
+        except Exception as exc:                      # a Lambda that raises becomes a 5xx; do the same
+            return self._send_json(500, {'error': f'{type(exc).__name__}: {exc}'})
+        payload = response['body'].encode('utf-8')
+        self.send_response(response['statusCode'])
+        self.send_header('Content-Type', 'application/json')
+        self.send_header('Content-Length', str(len(payload)))
+        self.end_headers()
+        self.wfile.write(payload)
+
     def do_GET(self):
         parsed = urlparse(self.path)
         if parsed.path == '/':
@@ -52,6 +69,8 @@ class Handler(BaseHTTPRequestHandler):
         if parsed.path == '/style.css':
             return self._send_file(WEB_DIR / 'style.css')
         if parsed.path == '/inventory':
+            if LOCAL:
+                return self._send_handler_response('GET')
             return self._send_json(200, json.loads(INVENTORY_FILE.read_text(encoding='utf-8')))
         self._send_json(404, {'error': 'not found'})
 
@@ -60,8 +79,14 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main() -> int:
+    if LOCAL:
+        sys.path.insert(0, str(ROOT))                 # so "src.lambda_inventory" and "data.init_db" import
+        from src.local_aws import configure
+        state_dir = configure()
     server = ThreadingHTTPServer(('0.0.0.0', PORT), Handler)
     print(f'listening on {server.server_address[1]}', flush=True)
+    if LOCAL:
+        print(f'local mode: database {os.environ["TINYWMS_SQLITE_PATH"]}, state under {state_dir}', flush=True)
     try:
         server.serve_forever()
     except KeyboardInterrupt:

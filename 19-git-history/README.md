@@ -4,6 +4,9 @@
 This stage teaches students how to read TinyWMS as a semester story in Git instead of pretending each lesson is a separate historical commit. The repository keeps the stage directories together in one checkout, so students can compare earlier and later lesson folders honestly without rewriting history or inventing tags.
 
 ## Files in this lesson
+- `deploy/local/run_local.sh` - starts the system on one machine, no AWS needed
+- `src/local_aws.py` - configures local mode and provides the directory-backed queue and event bus
+- `tests/test_local_stack.py` - drives local mode over HTTP and runs the worker and event consumers
 - `README.md` - lesson guide for the Git-history stage.
 - `docs/git-history.md` - explanation of the repository’s stage-directory model and honest comparison commands.
 - `docs/architecture.md` - updated component timeline derived from the existing assembly map.
@@ -17,6 +20,18 @@ This stage teaches students how to read TinyWMS as a semester story in Git inste
 - `src/pick_ticket_worker.py` - inherited worker used by the queue lesson and later demos.
 - `infra/template.yaml` - consolidated cloud stack artifact from the AWS lesson.
 - `tests/test_deployment_wiring.py` - inherited standard-library deployment wiring checks.
+
+## Run the whole system on your own machine
+No AWS account needed. One command starts the web page, the order API (the same handler code Lambda runs), a SQLite database, a queue, an event bus and the pick-ticket worker:
+```bash
+bash deploy/local/run_local.sh            # add --reset to start from a clean database
+# open http://127.0.0.1:8000/ , submit an order, then in a second terminal:
+tail -f pick-tickets.txt
+ls local-aws/pick-work local-aws/event-consumer-a      # the queue and the event, as files
+export TINYWMS_LOCAL=1
+python3 src/event_consumer_a.py local-aws/event-consumer-a
+```
+How it maps to the cloud design: the SQLite file stands in for RDS, each directory under `local-aws/` is an SQS queue (one JSON file per message), the event bus copies each event into `event-consumer-a` and `event-consumer-b` like the two EventBridge rules in `infra/events.yaml`, and `TINYWMS_LOCAL=1` is the only switch. Real SQS keeps a message hidden while a worker handles it and may deliver it twice; the file queue does neither, so the duplicate and retry lessons still need the tests or the cloud stack.
 
 ## Run the lesson
 From the repository root:

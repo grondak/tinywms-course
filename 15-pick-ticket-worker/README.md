@@ -4,6 +4,9 @@
 This stage separates two ideas that were previously combined: the imperative pick-work command sent to SQS and the factual `OrderPlaced` event sent to EventBridge. Students can compare "do this next" with "this happened" while keeping the existing order transaction, queue command, and inventory contract intact.
 
 ## Files in this lesson
+- `deploy/local/run_local.sh` - starts the system on one machine, no AWS needed
+- `src/local_aws.py` - configures local mode and provides the directory-backed queue and event bus
+- `tests/test_local_stack.py` - drives local mode over HTTP and runs the worker and event consumers
 - `README.md` - lesson guide for the event boundary, consumer demos, and compatibility checks.
 - `docs/architecture.md` - updated component map and stage history showing the new event path beside the existing queue path.
 - `docs/data-contracts.md` - updated contract guide with the `OrderPlaced` event shape and its relation to the queue command.
@@ -17,6 +20,18 @@ This stage separates two ideas that were previously combined: the imperative pic
 - `tests/test_event_consumers.py` - local tests for the two independent EventBridge consumers.
 - `tests/test_sqs_consumer.py` - inherited queue consumer tests that still prove receive/delete semantics.
 - `tests/test_web_app.js` - inherited browser-contract safety check.
+
+## Run the whole system on your own machine
+No AWS account needed. One command starts the web page, the order API (the same handler code Lambda runs), a SQLite database, a queue, an event bus and the pick-ticket worker:
+```bash
+bash deploy/local/run_local.sh            # add --reset to start from a clean database
+# open http://127.0.0.1:8000/ , submit an order, then in a second terminal:
+tail -f pick-tickets.txt
+ls local-aws/pick-work local-aws/event-consumer-a      # the queue and the event, as files
+export TINYWMS_LOCAL=1
+python3 src/event_consumer_a.py local-aws/event-consumer-a
+```
+How it maps to the cloud design: the SQLite file stands in for RDS, each directory under `local-aws/` is an SQS queue (one JSON file per message), the event bus copies each event into `event-consumer-a` and `event-consumer-b` like the two EventBridge rules in `infra/events.yaml`, and `TINYWMS_LOCAL=1` is the only switch. Real SQS keeps a message hidden while a worker handles it and may deliver it twice; the file queue does neither, so the duplicate and retry lessons still need the tests or the cloud stack.
 
 ## Run the lesson
 From this folder:

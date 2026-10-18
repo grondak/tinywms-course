@@ -34,6 +34,7 @@ TinyWMS now has nine visible teaching boundaries: the Stage 1 inventory JSON con
 | relational inventory schema | 08-relational-persistence | SQL files and database process (`data/schema.sql`, `data/seed.sql`, `data/init_db.py`, `src/db_adapter.py`, `src/sql_export.py`) | inventory JSON file and `TINYWMS_DB` / `TINYWMS_SQLITE_PATH` environment variables | `inventory` table rows seeded from the JSON sample | inventory JSON file, SQLite or PostgreSQL backend, lazy PostgreSQL driver import |
 | RDS deployment wrapper | 09-rds | AWS RDS / CloudFormation (`infra/rds.yaml`, `deploy/rds/README.md`) | CloudFormation parameters for DB name, credentials, subnet IDs, and security groups | RDS endpoint address and port outputs | relational inventory schema, AWS RDS, CloudFormation |
 | Lambda database-backed inventory handler | 10-lambda-rds | AWS Lambda (`src/lambda_inventory.py`) | Lambda event input for inventory requests, PostgreSQL connection settings from environment | Lambda response carrying inventory JSON mapped from database rows | Lambda inventory handler, relational schema, RDS deployment wrapper, database adapter |
+| local mode (SQLite in place of RDS) | 11-orders | Python process on Linux (`TINYWMS_LOCAL=1`, `src/local_aws.py`, `deploy/local/run_local.sh`) | the same handler calls and queue/event calls the AWS clients receive | the same inventory JSON from a SQLite file | Lambda handler, SQLite database |
 
 ## Component evolution timeline
 

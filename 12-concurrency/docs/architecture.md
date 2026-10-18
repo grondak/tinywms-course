@@ -42,6 +42,7 @@ SQLite cannot demonstrate the PostgreSQL row-lock lesson.
 | integrated inventory and order browser page | 11-orders | browser (`src/web/index.html`, `src/web/app.js`, `src/web/style.css`) | `GET /inventory`, `POST /orders`, same-origin or runtime API base override | refreshed inventory table plus visible request/response JSON | HTTP inventory/order server, inventory JSON contract, order JSON contract |
 | Lambda order handler | 11-orders | AWS Lambda (`src/lambda_inventory.py`) | Lambda event input for inventory and order requests | inventory JSON, accepted/rejected order JSON, relational writes | lambda inventory handler, relational schema, order JSON contract |
 | concurrent order hardening | 12-concurrency | database transaction boundary (`src/lambda_inventory.py`) | overlapping `place_order(...)` calls against the same inventory row | one accepted order and one clean failure without negative inventory | order handler, relational schema, transaction boundary, PostgreSQL row locking or atomic conditional decrement |
+| local mode (SQLite in place of RDS) | 12-concurrency | Python process on Linux (`TINYWMS_LOCAL=1`, `src/local_aws.py`, `deploy/local/run_local.sh`) | the same handler calls and queue/event calls the AWS clients receive | the same inventory JSON from a SQLite file | Lambda handler, SQLite database |
 
 ## Component evolution timeline
 

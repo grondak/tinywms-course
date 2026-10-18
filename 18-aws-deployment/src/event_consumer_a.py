@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 from typing import Any
 
@@ -9,6 +10,12 @@ from typing import Any
 def _queue_client(queue_client=None):
     if queue_client is not None:
         return queue_client
+    if os.environ.get('TINYWMS_LOCAL'):
+        try:
+            from src.local_aws import FileQueue
+        except ModuleNotFoundError:           # run as "python3 src/event_consumer_x.py"
+            from local_aws import FileQueue
+        return FileQueue()
     try:
         import boto3  # type: ignore
     except ModuleNotFoundError as exc:
@@ -43,7 +50,7 @@ def main(argv: list[str]) -> int:
         print('Usage: event_consumer_a.py <queue-url>')
         return 2
     for event in process_once(argv[1]):
-        print(f"consumer-a received {event['DetailType']} for {event['detail']['order_id']}")
+        print(f"consumer-a received {event.get('detail-type') or event.get('DetailType')} for {event['detail']['order_id']}")
     return 0
 
 

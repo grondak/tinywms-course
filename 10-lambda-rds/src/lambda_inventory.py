@@ -107,13 +107,21 @@ def _postgres_connection_from_dsn(dsn: str):
     return psycopg.connect(dsn)
 
 
+def _open_default_connection():
+    """Connection used when the caller does not inject one: SQLite when TINYWMS_DB=sqlite, otherwise PostgreSQL."""
+    if os.environ.get(TINYWMS_DB_ENV, 'postgres').strip().lower() == 'sqlite':
+        from src.db_adapter import connect_sqlite
+        return connect_sqlite()
+    return _postgres_connection()
+
+
 def handler(event, context, connection_factory: Callable[[], Any] | None = None):
     event = event or {}
     query_string = event.get('queryStringParameters') or {}
     if query_string.get('demo') == 'local-json':
         payload = _load_inventory()
     else:
-        factory = connection_factory or open_connection
+        factory = connection_factory or _open_default_connection
         connection = factory()
         try:
             payload = _read_inventory_rows(connection)

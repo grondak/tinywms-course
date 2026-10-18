@@ -55,6 +55,47 @@ class OrderRequest:
     lines: list[OrderLine]
 
 
+class DuplicateOrderError(InventoryError):
+    pass
+
+
+def _parse_body(event: dict[str, Any]) -> dict[str, Any]:
+    body = event.get('body') or '{}'
+    if isinstance(body, str):
+        try:
+            return json.loads(body)
+        except json.JSONDecodeError as exc:
+            raise OrderValidationError('request body must be JSON') from exc
+    if isinstance(body, dict):
+        return body
+    raise OrderValidationError('request body must be JSON')
+
+
+def parse_order_request(event: dict[str, Any]) -> OrderRequest:
+    body = _parse_body(event)
+    if 'order_id' not in body or 'lines' not in body:
+        raise OrderValidationError('invalid order')
+    if not isinstance(body['order_id'], str) or not body['order_id']:
+        raise OrderValidationError('order_id must be a non-empty string')
+    if not isinstance(body['lines'], list) or not body['lines']:
+        raise OrderValidationError('lines must be a non-empty array')
+    lines: list[OrderLine] = []
+    for item in body['lines']:
+        if not isinstance(item, dict):
+            raise OrderValidationError('each order line must be an object')
+        sku = item.get('sku')
+        quantity = item.get('quantity')
+        description = item.get('description')
+        if not isinstance(sku, str) or not sku:
+            raise OrderValidationError('line sku must be a non-empty string')
+        if not isinstance(quantity, int) or quantity < 1:
+            raise OrderValidationError('line quantity must be a positive integer')
+        if description is not None and not isinstance(description, str):
+            raise OrderValidationError('line description must be a string when present')
+        lines.append(OrderLine(sku=sku, quantity=quantity, description=description or ''))
+    return OrderRequest(order_id=body['order_id'], lines=lines)
+
+
 def _load_inventory() -> list[dict[str, Any]]:
     return json.loads(INVENTORY_FILE.read_text(encoding='utf-8'))
 
@@ -128,6 +169,14 @@ def _postgres_connection_from_dsn(dsn: str):
     return psycopg.connect(dsn)
 
 
+def _open_default_connection():
+    """Connection used when the caller does not inject one: SQLite when TINYWMS_DB=sqlite, otherwise PostgreSQL."""
+    if os.environ.get(TINYWMS_DB_ENV, 'postgres').strip().lower() == 'sqlite':
+        from src.db_adapter import connect_sqlite
+        return connect_sqlite()
+    return _postgres_connection()
+
+
 def _validate_order(order: OrderRequest) -> None:
     if not order.order_id:
         raise OrderValidationError('order_id must be a non-empty string')
@@ -165,7 +214,12 @@ def place_order(connection, order: OrderRequest) -> dict[str, Any]:
             if cursor.rowcount != 1:
                 raise InventoryShortageError(f'insufficient inventory for {line.sku}')
             locked_rows.append(inventory)
-        cursor.execute(INSERT_ORDER_SQL, (order.order_id, 'accepted'))
+        try:
+            cursor.execute(INSERT_ORDER_SQL, (order.order_id, 'accepted'))
+        except Exception as exc:
+            if type(exc).__name__ in ('IntegrityError', 'UniqueViolation'):
+                raise DuplicateOrderError(f'order already exists: {order.order_id}') from exc
+            raise
         for line in order.lines:
             cursor.execute(INSERT_ORDER_LINE_SQL, (order.order_id, line.sku, line.quantity))
         connection.commit()
@@ -184,15 +238,32 @@ def place_order(connection, order: OrderRequest) -> dict[str, Any]:
         cursor.close()
 
 
+def _json_response(status: int, payload: Any) -> dict[str, Any]:
+    return {'statusCode': status, 'headers': {'Content-Type': 'application/json'}, 'body': json.dumps(payload)}
+
+
 def handler(event, context, connection_factory=None):
     event = event or {}
+    if event.get('httpMethod') == 'POST':
+        try:
+            order = parse_order_request(event)
+            connection = (connection_factory or _open_default_connection)()
+            try:
+                result = place_order(connection, order)
+            finally:
+                connection.close()
+            return _json_response(201, result)
+        except OrderValidationError as exc:
+            return _json_response(400, {'error': str(exc)})
+        except (InventoryShortageError, DuplicateOrderError) as exc:
+            return _json_response(409, {'error': str(exc)})
     query_string = event.get('queryStringParameters') or {}
     if query_string.get('demo') == 'local-json':
         payload = _load_inventory()
     else:
-        connection = (connection_factory or open_connection)()
+        connection = (connection_factory or _open_default_connection)()
         try:
             payload = _read_inventory_rows(connection)
         finally:
             connection.close()
-    return {'statusCode': 200, 'headers': {'Content-Type': 'application/json'}, 'body': json.dumps(payload)}
+    return _json_response(200, payload)
